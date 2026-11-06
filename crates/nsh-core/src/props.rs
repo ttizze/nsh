@@ -317,6 +317,12 @@ pub struct Ripple {
 /// Non-style properties of a view that only the platform needs.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ViewProps {
+    /// Tab and screen readers go through the view's children as they are
+    /// on screen, along this axis and then across it, instead of in tree
+    /// order. The core sets it on a list in its parent's viewport: a list
+    /// recycles its cells, so in the tree they are not in their rows'
+    /// order. Scroll views read their content so without it.
+    pub screen_order: Option<crate::geometry::Axis>,
     /// Which touches the view and its subtree receive.
     pub pointer_events: PointerEvents,
     /// Extends the touch area beyond the view's bounds.
