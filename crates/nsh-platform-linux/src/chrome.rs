@@ -202,6 +202,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::Close => close(surface),
         // GTK's menu bar always shows.
         DesktopCommand::SetMenuBar(_) => {}
+        // GTK labels the menus it makes itself.
+        DesktopCommand::SetMenuLabels(_) => {}
     }
 }
 

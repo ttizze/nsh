@@ -399,6 +399,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             };
             menus::open(surface, menus::Kind::App, items.clone(), anchor, false);
         }
+        // Its menus' roles keep their labels.
+        DesktopCommand::SetMenuLabels(_) => {}
     }
 }
 
