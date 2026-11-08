@@ -14,6 +14,11 @@ test("a selection reports its box in the view and in the root view", async () =>
   // From its middle down into the second.
   await app.drag("text:Alpha beta gamma", { x: 0, y: 30 });
   await app.waitFor("text:/^Selected: \\d+ chars, inside, moved, two lines$/");
+  // A right click on the selection: the selectable view's menu, the
+  // selection kept for it.
+  await app.rightClick("text:Delta epsilon");
+  await app.waitFor("text:/^Menu: for \".*Delta.*\"$/");
+  expect(app.texts().some((t) => /^Selected: \d+ chars, inside, moved, two lines$/.test(t))).toBe(true);
   // A click puts the caret: nothing selected.
   await app.drag("text:Delta epsilon", { x: 1, y: 0 });
   await app.waitFor("Selected: none");
