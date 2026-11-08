@@ -10,6 +10,7 @@ use std::{
 };
 
 use nsh_core::{
+    desktop::MenuLabels,
     geometry::{Size, px},
     platform::{Appearance, Locale},
 };
@@ -160,6 +161,11 @@ pub struct AppOptions {
     /// their calls and posts ([`AppView::host`]). One for every app the view
     /// loads; a new one by default.
     pub host: nsh_engine::HostChannel,
+    /// The labels of the menus the view makes in the app's language: the
+    /// edit menus of its text fields and selectable text, and the items
+    /// with a role and no label of their own in the app's menus. English
+    /// for what it does not label.
+    pub menu_labels: MenuLabels,
 }
 
 impl Default for AppOptions {
@@ -178,6 +184,7 @@ impl Default for AppOptions {
             cache: Default::default(),
             storage: None,
             host: nsh_engine::HostChannel::default(),
+            menu_labels: MenuLabels::default(),
         }
     }
 }
@@ -223,6 +230,7 @@ impl AppView {
     pub fn new(parent: Option<HWND>, options: AppOptions) -> windows::core::Result<Rc<AppView>> {
         let surface = Surface::new(initial_environment());
         surface.appearance.set(options.appearance);
+        surface.chrome.labels.replace(options.menu_labels.clone());
         register_app_components(&options.components);
         surface.native.set_components(options.components.clone());
         surface.native.set_app_id(&options.app_id);

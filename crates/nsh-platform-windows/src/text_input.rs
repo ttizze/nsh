@@ -1736,10 +1736,11 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
             s == 0 && e == m.text().len(),
         )
     };
-    let item = |role: Option<MenuRole>, label: &'static str, enabled: bool, vk: u16, ctrl: bool| {
-        LocalItem::Item {
+    let delete = surface.chrome.labels.borrow().delete.clone();
+    let item =
+        |role: Option<MenuRole>, label: &str, enabled: bool, vk: u16, ctrl: bool| LocalItem::Item {
             role,
-            label,
+            label: label.to_owned(),
             enabled,
             action: Rc::new(move |s: &Rc<Surface>| {
                 let event = KeyEvent {
@@ -1753,8 +1754,7 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
                 };
                 key(s, &event);
             }),
-        }
-    };
+        };
     crate::chrome::popup_actions(
         surface,
         vec![
@@ -1778,7 +1778,13 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
                 0x56,
                 true,
             ),
-            item(None, "Delete", editable && selected, 0x2E, false),
+            item(
+                None,
+                delete.as_deref().unwrap_or("Delete"),
+                editable && selected,
+                0x2E,
+                false,
+            ),
             LocalItem::Separator,
             item(Some(MenuRole::SelectAll), "", !empty && !all, 0x41, true),
         ],

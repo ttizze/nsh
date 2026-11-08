@@ -31,8 +31,8 @@ use std::{
 use nsh_core::{
     Color, EventKind, EventPayload, PayloadValue, ROOT_ID,
     desktop::{
-        DesktopCommand, Key, MenuAction, MenuItem, MenuRole, Shortcut, TitleBarStyle, WindowFrame,
-        WindowLevel,
+        DesktopCommand, Key, MenuAction, MenuItem, MenuLabels, MenuRole, Shortcut, TitleBarStyle,
+        WindowFrame, WindowLevel,
     },
     geometry::{Edges, Points},
 };
@@ -134,6 +134,10 @@ pub(crate) type Action = Rc<dyn Fn(&Rc<Surface>)>;
 /// A surface's chrome.
 #[derive(Default)]
 pub(crate) struct Chrome {
+    /// The app's labels of the roles (`AppOptions::menu_labels`): the
+    /// platform's own menus and the role items with no label of their own
+    /// show them.
+    pub(crate) labels: RefCell<MenuLabels>,
     style: Cell<TitleBarStyle>,
     /// The app's title bar's height (`Window.setTitleBar`'s).
     height: Cell<Option<f32>>,
@@ -419,7 +423,7 @@ pub(crate) enum LocalItem {
         /// work).
         role: Option<MenuRole>,
         /// A label of its own (else the role's).
-        label: &'static str,
+        label: String,
         /// It can be chosen.
         enabled: bool,
         /// What choosing it does.
@@ -444,10 +448,11 @@ pub(crate) fn popup_actions(surface: &Surface, items: Vec<LocalItem>) {
                 actions.push(action);
                 MenuItem::Action(MenuAction {
                     id: actions.len() as u32,
-                    label: if label.is_empty() {
-                        role.map_or("", MenuRole::label).to_owned()
-                    } else {
-                        label.to_owned()
+                    label: match role {
+                        Some(role) if label.is_empty() => {
+                            surface.chrome.labels.borrow().label(role).to_owned()
+                        }
+                        _ => label,
                     },
                     shortcut: role.and_then(|r| r.shortcut(false)),
                     enabled,
@@ -830,12 +835,12 @@ fn theme_menus(dark: bool) {
     });
 }
 
-/// A menu item's text: `&` shows as itself, the shortcut after a tab.
-fn item_text(action: &MenuAction) -> Vec<u16> {
-    let label = if action.label.is_empty() {
-        action.role.map_or("", MenuRole::label)
-    } else {
-        &action.label
+/// A menu item's text: `&` shows as itself, the shortcut after a tab; a
+/// role's label from `labels` when it has none of its own.
+fn item_text(action: &MenuAction, labels: &MenuLabels) -> Vec<u16> {
+    let label = match action.role {
+        Some(role) if action.label.is_empty() => labels.label(role),
+        _ => &action.label,
     };
     let mut text = label.replace('&', "&&");
     if let Some(shortcut) = &action.shortcut {
@@ -854,8 +859,9 @@ fn unsupported(role: Option<MenuRole>) -> bool {
 }
 
 /// Appends `items` to `menu`, numbering their commands in `entries`
-/// (command id = index + 1).
-fn append(menu: HMENU, items: &[MenuItem], entries: &mut Vec<Entry>) {
+/// (command id = index + 1); roles with no label of their own read
+/// `labels`.
+fn append(menu: HMENU, items: &[MenuItem], labels: &MenuLabels, entries: &mut Vec<Entry>) {
     let mut last_separator = true;
     for item in items {
         // SAFETY: appending to a live menu with NUL-terminated strings; a
@@ -883,7 +889,7 @@ fn append(menu: HMENU, items: &[MenuItem], entries: &mut Vec<Entry>) {
                     if action.checked == Some(true) {
                         flags |= MF_CHECKED;
                     }
-                    let text = item_text(action);
+                    let text = item_text(action, labels);
                     let _ = AppendMenuW(menu, flags, entries.len(), PCWSTR(text.as_ptr()));
                     last_separator = false;
                 }
@@ -893,7 +899,7 @@ fn append(menu: HMENU, items: &[MenuItem], entries: &mut Vec<Entry>) {
                     items,
                 } => {
                     let Ok(sub) = CreatePopupMenu() else { continue };
-                    append(sub, items, entries);
+                    append(sub, items, labels, entries);
                     let mut flags = MF_POPUP | MF_STRING;
                     if !enabled {
                         flags |= MF_GRAYED;
@@ -923,7 +929,7 @@ fn show_menu_bar(surface: &Surface) {
         let bar = match &shown {
             Some(items) => CreateMenu()
                 .ok()
-                .inspect(|bar| append(*bar, items, &mut entries)),
+                .inspect(|bar| append(*bar, items, &c.labels.borrow(), &mut entries)),
             None => None,
         };
         theme_menus(crate::system::dark(surface));
@@ -1008,7 +1014,7 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
     // SAFETY: a menu made, tracked and destroyed on this thread.
     let chosen = unsafe {
         let Ok(menu) = CreatePopupMenu() else { return };
-        append(menu, &items, &mut entries);
+        append(menu, &items, &surface.chrome.labels.borrow(), &mut entries);
         let mut p = POINT::default();
         match at {
             Some((x, y)) => {
@@ -1275,4 +1281,29 @@ pub(crate) fn appearance_changed(surface: &Surface) {
         let _ = unsafe { DrawMenuBar(hwnd) };
     }
     surface.invalidate();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An item with a role and no label of its own reads the app's label
+    /// of the role, else the English one, its shortcut after a tab.
+    #[test]
+    fn a_role_item_reads_the_apps_label() {
+        let action = MenuAction {
+            id: 1,
+            label: String::new(),
+            shortcut: MenuRole::Copy.shortcut(false),
+            enabled: true,
+            checked: None,
+            role: Some(MenuRole::Copy),
+            when: nsh_core::keymap::When::Always,
+        };
+        let text = |labels: &MenuLabels| String::from_utf16(&item_text(&action, labels)).unwrap();
+        assert_eq!(text(&MenuLabels::default()), "Copy\tCtrl+C\0");
+        let mut labels = MenuLabels::default();
+        labels.roles.insert(MenuRole::Copy, "コピー".into());
+        assert_eq!(text(&labels), "コピー\tCtrl+C\0");
+    }
 }
