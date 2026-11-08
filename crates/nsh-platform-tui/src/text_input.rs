@@ -148,7 +148,8 @@ impl Field {
         let mut event = nsh_core::PasteEvent::default();
         event.text = text.to_owned();
         control.dispatch_event(id, EventKind::Paste, EventPayload::Paste(Box::new(event)));
-        if config.paste_behavior == nsh_core::PasteBehavior::Insert {
+        // A terminal pastes text only.
+        if config.paste_behavior.inserts(false) {
             self.insert(
                 config,
                 &text_edit::pasted(text, config.multiline),
