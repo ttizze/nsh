@@ -21,6 +21,7 @@ function App() {
         <Text>Grow first</Text>
       </View>
       <List
+        testID="follow-feed"
         each={items()}
         maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 20 }}
         estimatedItemSize={40}
