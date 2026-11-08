@@ -1709,10 +1709,11 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
             }
         })
     };
-    let item = |role: Option<MenuRole>, label: &'static str, enabled: bool, action: Action| {
+    let delete = surface.chrome.labels.borrow().delete.clone();
+    let item = |role: Option<MenuRole>, label: &str, enabled: bool, action: Action| {
         LocalItem::Item {
             role,
-            label,
+            label: label.to_owned(),
             enabled,
             action,
         }
@@ -1750,7 +1751,7 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
             ),
             item(
                 None,
-                "Delete",
+                delete.as_deref().unwrap_or("Delete"),
                 editable && selected,
                 command(WM_CLEAR, 0, 0),
             ),
