@@ -381,7 +381,8 @@ impl Ctx {
                 }
             });
         }
-        let inserts = input.config.borrow().paste_behavior == nsh_core::PasteBehavior::Insert;
+        let behavior = input.config.borrow().paste_behavior;
+        let inserts = behavior.inserts(crate::system::has_pasted_files(&widget.clipboard()));
         // Its insertion (and the deletion of the selection it replaces)
         // types no key.
         input.pasting.set(inserts);
@@ -1502,12 +1503,14 @@ pub(crate) fn current_text(view: &NshView) -> Option<String> {
     Some(text)
 }
 
-/// Whether the input `view` inserts what is pasted (`pasteBehavior`).
+/// Whether the input `view` inserts the text of a paste (`pasteBehavior`):
+/// `files` when it holds images or files.
 #[cfg(feature = "dev")]
-pub(crate) fn pastes_text(view: &NshView) -> bool {
-    view.state().input.clone().is_some_and(|input| {
-        input.config.borrow().paste_behavior == nsh_core::PasteBehavior::Insert
-    })
+pub(crate) fn pastes_text(view: &NshView, files: bool) -> bool {
+    view.state()
+        .input
+        .clone()
+        .is_some_and(|input| input.config.borrow().paste_behavior.inserts(files))
 }
 
 /// `InputValue`: JS's text, unless the user typed since JS saw `count`.

@@ -5013,18 +5013,22 @@ class Player {
 
   /** A paste into a field: what the clipboard holds (`onPaste`, the files'
    * bytes handed to WebAssembly as they are), and the field's own paste
-   * of the text unless `pasteBehavior` is `"report"`. The browser gives the
-   * clipboard only to this event, the user's paste. */
+   * of the text unless `pasteBehavior` is `"report"`, or `"reportFiles"`
+   * and the paste holds files. The browser gives the clipboard only to
+   * this event, the user's paste. */
   pasted(el, e) {
-    if (el._config?.pasteInserts === false) e.preventDefault();
-    if (!el._events.has("onPaste")) return;
     const data = e.clipboardData;
-    const text = data?.getData("text/plain") ?? "";
-    const html = data?.getData("text/html") ?? "";
     const files = [...(data?.files ?? [])];
     // A file manager's files are local paths the page cannot read: their
     // `file:` URLs, when the browser lists them.
     const uris = (data?.getData("text/uri-list") ?? "").split(/\r?\n/).filter((u) => u.startsWith("file:"));
+    const config = el._config;
+    if (config?.pasteInserts === false || (config?.pasteReportsFiles && (files.length || uris.length))) {
+      e.preventDefault();
+    }
+    if (!el._events.has("onPaste")) return;
+    const text = data?.getData("text/plain") ?? "";
+    const html = data?.getData("text/html") ?? "";
     Promise.all(files.map((f) => f.arrayBuffer())).then((buffers) => {
       const size = buffers.reduce((n, b) => n + b.byteLength, 0);
       const bytes = new Uint8Array(size);

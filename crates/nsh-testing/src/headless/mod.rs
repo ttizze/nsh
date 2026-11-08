@@ -1909,8 +1909,8 @@ impl Headless {
         let Some(input) = self.screen.input_mut(id) else {
             return;
         };
-        if input.config.paste_behavior != nsh_core::PasteBehavior::Insert || content.text.is_empty()
-        {
+        let files = !content.files.is_empty() || !content.uris.is_empty();
+        if !input.config.paste_behavior.inserts(files) || content.text.is_empty() {
             return;
         }
         self.insert_text(id, &content.text);
@@ -2803,6 +2803,50 @@ mod tests {
                 .unwrap_err()
                 .starts_with("no input matches `id:none`")
         );
+    }
+
+    /// A message field that inserts pasted text but leaves a pasted image
+    /// to the app, saying what it heard.
+    #[component]
+    fn Message() -> impl IntoElement {
+        let text = signal(String::new());
+        let attached = signal(0_usize);
+        view()
+            .child(
+                input()
+                    .test_id("message")
+                    .paste_behavior(PasteBehavior::ReportFiles)
+                    .value(move || text.get())
+                    .on_change(move |t: &str| text.set(t.to_owned()))
+                    .on_paste(move |e: &PasteEvent| attached.update(|a| *a += e.files.len())),
+            )
+            .child(nsh_core::element::text(move || {
+                format!("Text: {}, attached {}", text.get(), attached.get())
+            }))
+    }
+
+    #[test]
+    fn a_paste_with_an_image_inserts_no_text_when_files_are_reported() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Message>())).unwrap();
+        app.first_render().unwrap();
+        // Text alone goes in.
+        app.paste("id:message", &PasteEvent::new("hello")).unwrap();
+        app.wait_for("Text: hello, attached 0").unwrap();
+        // An image with its name as text: the image is the app's, the text
+        // is left out.
+        let mut image = PasteEvent::new("shot.png");
+        image
+            .files
+            .push(PastedFile::image(vec![0x89, b'P', b'N', b'G']));
+        app.paste("id:message", &image).unwrap();
+        app.wait_for("Text: hello, attached 1").unwrap();
+        assert_eq!(app.screen().input_text("id:message"), Ok(Some("hello")));
+        // So is a copied file's.
+        let mut file = PasteEvent::new("notes.txt");
+        file.uris.push("file:///tmp/notes.txt".into());
+        app.paste("id:message", &file).unwrap();
+        app.wait(Duration::from_millis(50)).unwrap();
+        assert_eq!(app.screen().input_text("id:message"), Ok(Some("hello")));
     }
 
     /// A list of rows taller than the screen, saying where it is.

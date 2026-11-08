@@ -878,8 +878,10 @@ fn input_json(c: &InputConfig) -> String {
         let _ = write!(s, ",\"maxLength\":{m}");
     }
     input::auto_complete(&mut s, c.auto_fill);
-    if c.paste_behavior != nsh_core::PasteBehavior::Insert {
-        s.push_str(",\"pasteInserts\":false");
+    match c.paste_behavior {
+        nsh_core::PasteBehavior::Insert => {}
+        nsh_core::PasteBehavior::Report => s.push_str(",\"pasteInserts\":false"),
+        nsh_core::PasteBehavior::ReportFiles => s.push_str(",\"pasteReportsFiles\":true"),
     }
     if !c.scrollbar_visible {
         s.push_str(",\"noIndicator\":true");

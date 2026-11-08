@@ -1401,6 +1401,15 @@ fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
     });
 }
 
+/// Whether the clipboard `board` holds images or files, which a paste
+/// reports ([`read_pasted`]'s `files` and `uris`): told at once, from its
+/// formats.
+pub(crate) fn has_pasted_files(board: &gdk::Clipboard) -> bool {
+    let types = board.formats().union_deserialize_types();
+    types.contains_type(gdk::Texture::static_type())
+        || types.contains_type(gdk::FileList::static_type())
+}
+
 /// What `board` holds, read as the user pastes into an input (`onPaste`):
 /// its text, its image (as PNG) and its local files' `file:` URIs. GTK
 /// reads a clipboard asynchronously: `done` gets it once read.

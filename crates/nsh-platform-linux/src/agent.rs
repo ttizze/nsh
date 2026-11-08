@@ -507,7 +507,8 @@ impl Native for LinuxNative {
                     nsh_core::EventPayload::Paste(Box::new(content.clone())),
                 );
             }
-            if crate::text_input::pastes_text(&view) && !content.text.is_empty() {
+            let files = !content.files.is_empty() || !content.uris.is_empty();
+            if crate::text_input::pastes_text(&view, files) && !content.text.is_empty() {
                 synth::type_text(w, &content.text);
             }
             Ok(())

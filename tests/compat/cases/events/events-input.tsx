@@ -63,6 +63,7 @@ function App() {
           pasted.set(`${e.text} html ${e.html.length} files ${e.files.length} uris ${e.uris.length}`);
         }}
       />
+      <Input testID="paste-files" pasteBehavior="reportFiles" style={{ width: 300, height: 40 }} />
       <Text>Pasted: {pasted()}</Text>
       <Text>Inserted: {inserted()}</Text>
       <Text>Submitted: {submitted()}</Text>

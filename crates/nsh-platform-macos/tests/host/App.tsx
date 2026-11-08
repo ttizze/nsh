@@ -15,6 +15,8 @@ const PAGE = `<!doctype html><body style="margin:0">
 
 function App() {
   const counted = signal(0);
+  const pasteText = signal("");
+  const pasted = signal("none");
   const chosen = signal("none");
   const page = signal("none");
   const real = signal("asking");
@@ -54,6 +56,9 @@ function App() {
       {button("Backspace page", () => web.sendInput({ type: "key", key: "Backspace" }))}
       {button("Count here", (e) => clicks.set(`here ${e.clickCount}`))}
       {button("Count there", (e) => clicks.set(`there ${e.clickCount}`))}
+      <Input accessibilityLabel="Message" pasteBehavior="reportFiles" style={{ width: 300, height: 40 }} onChange={({ value }) => pasteText.set(value)} onPaste={(e) => pasted.set(`${e.text} files ${e.files.length} uris ${e.uris.length}`)} />
+      <Text>{`Text: ${pasteText()}`}</Text>
+      <Text>{`Pasted: ${pasted()}`}</Text>
     </View>
   );
 }

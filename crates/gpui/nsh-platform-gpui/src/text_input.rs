@@ -2298,14 +2298,16 @@ fn paste(surface: &Surface, view: &NshView) {
             return;
         };
         let text = item.as_ref().and_then(|item| item.text());
+        let paste = pasted_content(text.clone(), item);
+        let files = !paste.files.is_empty() || !paste.uris.is_empty();
         if view.state().events.contains(EventKind::Paste) {
             surface.event(
                 view.id(),
                 EventKind::Paste,
-                EventPayload::Paste(Box::new(pasted_content(text.clone(), item))),
+                EventPayload::Paste(Box::new(paste)),
             );
         }
-        if input.config.borrow().paste_behavior != nsh_core::PasteBehavior::Insert {
+        if !input.config.borrow().paste_behavior.inserts(files) {
             return;
         }
         let Some(text) = text else {

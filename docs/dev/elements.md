@@ -432,7 +432,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   the clipboard, images: `PastedFile`s whose bytes become JS `File`s in `nsh-js` `payload_object`, never a JS string
   or base64) and `uris` (local files' `file:` URLs, as `onFileDrop`'s). The platform reads the clipboard in the
   paste's own handler, on the user's paste only, and only when the app listens. Whether the input inserts the text is
-  answered at once from `pasteBehavior` (`InputConfig::paste_behavior`: `"insert"`, the default, or `"report"`);
+  answered at once from `pasteBehavior` (`InputConfig::paste_behavior`: `"insert"`, the default, `"report"`, or `"reportFiles"`, which inserts text unless the paste holds images or files);
   images and files are never inserted. Inserted text is clipped to what `maxLength` leaves room for, as a browser's
   `maxlength` clips it (iOS cuts between composed character sequences, the other platforms between code points). The event comes before the `onChangeText` of the text it inserts (Linux:
   maybe after, as GTK's own paste and NSH's read of the clipboard are both asynchronous; with `"report"` nothing is

@@ -183,7 +183,7 @@ let composing = false;
 | `readonly` | `boolean` | `false` | 用户可以选择和复制文本，但不能修改。 |
 | `autoFocus` | `boolean` | `false` | 出现时自动获得焦点。 |
 | `submitBehavior` | `"submit" \| "blurAndSubmit" \| "newline"` | 单行 `"blurAndSubmit"`，多行 `"newline"` | 回车键做什么：提交并保持焦点、提交后失去焦点，或插入换行（仅多行）。 |
-| `pasteBehavior` | `"insert" \| "report"` | `"insert"` | 粘贴做什么：插入其文本，或什么都不插入（[粘贴](#粘贴图片和文件)）。 |
+| `pasteBehavior` | `"insert" \| "report" \| "reportFiles"` | `"insert"` | 粘贴做什么：插入其文本，什么都不插入，或在不含图片和文件时插入其文本（[粘贴](#粘贴图片和文件)）。 |
 | `caret` | `boolean` | `true` | 绘制光标；`false` 隐藏光标。 |
 | `ios={{ keyboardAppearance }}` | `"default" \| "light" \| "dark"` | `"default"` | 键盘的外观（iOS）。 |
 | `selectedRange` | `{ start: number; end?: number }` | | 受控的选区，单位为 UTF-16 码元。 |
@@ -503,7 +503,7 @@ const caret = signal<Bounds | null>(null);
 
 粘贴事件（`.on_paste(..)`，TSX 的 `onPaste`）报告用户粘贴了什么，无论来自快捷键、菜单中的“粘贴”，还是键盘插入的图片：`text`、`html`、`files` 和 `uris`。`html` 是带格式的同一内容，即浏览器、办公软件或富文本编辑器复制的 HTML（Linux 和 Web）。`files` 是剪贴板中以数据形式存在的内容，例如截图、从网页或其他应用复制的图片：应用可以上传或显示的 `File`，名为 `image.png`（或其实际类型）。`uris` 是在文件管理器中复制的文件的 `file:` URL，与拖放文件时一样。平台在用户粘贴时读取剪贴板，且只在那时读取。
 
-输入框照常自己插入粘贴的文本：事件在该文本的 `onChange` 之前到达。图片和文件从不插入，因为输入框只容纳文本。`pasteBehavior` 为 `"report"` 时输入框什么都不插入，由应用决定粘贴的效果：把长文本作为附件发送，或插入整理后的版本。由于系统要求当场作答，输入框根据这个属性立即决定。
+输入框照常自己插入粘贴的文本：事件在该文本的 `onChange` 之前到达。图片和文件从不插入，因为输入框只容纳文本。`pasteBehavior` 为 `"report"` 时输入框什么都不插入，由应用决定粘贴的效果：把长文本作为附件发送，或插入整理后的版本。为 `"reportFiles"` 时，只含文本的粘贴照常插入文本，含有图片或文件的粘贴什么都不插入：复制的图片常常带着它的名称或地址作为文本，聊天应用只把图片作为附件。由于系统要求当场作答，输入框根据这个属性立即决定，系统的撤销也因此保持原样。
 
 这时事件在插入任何内容之前到达，应用可以放行、取消或改写这次粘贴。ref 的 `insertText`（Rust 的 `insert_text`）以用户编辑的方式用放行的文本替换选区：遵守 `maxLength` 与单行规则，由 `onChange` 报告，在 Linux 和 Web 上是输入框撤销历史中的一步，Ctrl+Z 一次即可撤回。设置新的 `value` 则是替换整段文本。
 
