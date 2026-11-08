@@ -748,7 +748,8 @@ define_class!(
         }
 
         // None while VoiceOver must not reach the children
-        // ([`crate::access::hides_children`]), else AppKit's.
+        // ([`crate::access::hides_children`]), else AppKit's, in the order
+        // they are on screen ([`crate::access::in_reading_order`]).
         #[unsafe(method_id(accessibilityChildren))]
         fn accessibility_children(&self) -> Option<Retained<NSArray>> {
             let hides = self
@@ -760,7 +761,8 @@ define_class!(
                 Some(NSArray::new())
             } else {
                 // SAFETY: NSView's own children.
-                unsafe { msg_send![super(self), accessibilityChildren] }
+                let all = unsafe { msg_send![super(self), accessibilityChildren] };
+                crate::access::in_reading_order(&NshView(self.retain()), all)
             }
         }
 
@@ -1096,6 +1098,11 @@ impl NshView {
     /// [`NshView::moved`] afterwards.
     pub(crate) fn state_mut(&self) -> RefMut<'_, ViewState> {
         self.ivars().state.borrow_mut()
+    }
+
+    /// Its state, unless it is borrowed to change.
+    pub(crate) fn try_state(&self) -> Option<Ref<'_, ViewState>> {
+        self.ivars().state.try_borrow().ok()
     }
 
     /// Its state, to change, unless it is borrowed.

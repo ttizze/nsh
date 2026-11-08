@@ -20,6 +20,9 @@
 //!   VoiceOver does not see);
 //! - its `testID` as its accessibility identifier (what UI tests find).
 //!
+//! A scroll view's children, and a list's in its parent's viewport, are
+//! read in the order they are on screen ([`in_reading_order`]).
+//!
 //! Live regions are emulated by announcing a changed label or text
 //! (`NSAccessibilityAnnouncementRequestedNotification`);
 //! `AXPress` presses a view that takes presses, as Return does when it
@@ -34,9 +37,10 @@ use std::sync::Arc;
 
 use nsh_core::{
     Accessibility, AccessibilityRole as Role, AttributedText, Checked, EventKind, EventMask,
-    LiveRegion, MountBatch, ViewKind, ViewStyle,
+    LiveRegion, MountBatch, Point, Points, ViewKind, ViewStyle, geometry::Axis,
+    scroll::reading_order,
 };
-use objc2::{MainThreadOnly, rc::Retained, runtime::AnyObject};
+use objc2::{MainThreadOnly, Message, rc::Retained, runtime::AnyObject};
 use objc2_app_kit::{
     NSAccessibility, NSAccessibilityAnnouncementKey,
     NSAccessibilityAnnouncementRequestedNotification, NSAccessibilityLayoutChangedNotification,
@@ -45,7 +49,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString};
 
-use crate::view::{NshView, ViewState};
+use crate::view::{NshView, ViewState, superview};
 
 /// What was last given to AppKit for one view.
 #[derive(Debug, Default)]
@@ -72,6 +76,61 @@ pub(crate) struct Applied {
 /// AppKit's again, so a subtree shown again stayed out of reach.
 pub(crate) fn hides_children(s: &ViewState) -> bool {
     s.access.ax.grouped
+}
+
+/// AppKit's accessibility `children` of `view` in the order they are on
+/// screen, for a scroll view (along its axis) and a list in its parent's
+/// viewport (`ViewProps::screen_order`, along the list's), as the other
+/// desktop backends read them ([`reading_order`]): a list recycles its
+/// cells, so its subviews are not in their rows' order. Each element goes
+/// by the frame of the child view it is in (AppKit's children are the
+/// elements inside the subviews that are none). Any other view's children,
+/// and those with an element that is no view of a child, stay in tree
+/// order.
+pub(crate) fn in_reading_order(
+    view: &NshView,
+    children: Option<Retained<NSArray>>,
+) -> Option<Retained<NSArray>> {
+    let axis = view.try_state().and_then(|s| match &s.scroll {
+        Some(scroll) if scroll.horizontal => Some(Axis::Horizontal),
+        Some(_) => Some(Axis::Vertical),
+        None => s.props.screen_order,
+    });
+    let (Some(axis), Some(list)) = (axis, children.as_ref()) else {
+        return children;
+    };
+    if list.count() < 2 {
+        return children;
+    }
+    let container = view.container();
+    let mut keyed = Vec::with_capacity(list.count());
+    for child in list.iter() {
+        let Some(origin) = child
+            .downcast_ref::<NSView>()
+            .and_then(|v| child_origin(&container, v))
+        else {
+            return children;
+        };
+        keyed.push((origin, child));
+    }
+    reading_order(axis, &mut keyed, |(origin, _)| *origin);
+    let ordered: Vec<Retained<AnyObject>> = keyed.into_iter().map(|(_, child)| child).collect();
+    Some(NSArray::from_retained_slice(&ordered))
+}
+
+/// The frame origin of the child view of `container` that `view` is or is
+/// in.
+fn child_origin(container: &NSView, view: &NSView) -> Option<Point<Points>> {
+    let mut at = view.retain();
+    loop {
+        let parent = superview(&at)?;
+        if std::ptr::eq(&*parent, container) {
+            break;
+        }
+        at = parent;
+    }
+    let child = NshView::from_ns(&at)?;
+    child.try_state().map(|s| s.frame.origin)
 }
 
 /// What `apply` last wrote, field by field.
