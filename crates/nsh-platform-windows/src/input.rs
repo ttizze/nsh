@@ -724,10 +724,32 @@ pub(crate) fn window_drag(surface: &Surface, x: f32, y: f32) -> bool {
     false
 }
 
+/// Whether a view from `view` up to the selectable view around it (that
+/// one included) listens to `onContextMenu`: it hears a context menu asked
+/// for on selectable text there, in place of the text's edit menu, as on
+/// macOS, where selectable text has no menu of its own.
+fn selectable_menu_is_the_apps(view: &NshView) -> bool {
+    let Some(area) = crate::selectable_view::area_of(view) else {
+        return false;
+    };
+    let mut at = Some(view.clone());
+    while let Some(v) = at {
+        if v.state().events.contains(EventKind::ContextMenu) {
+            return true;
+        }
+        if v == area {
+            return false;
+        }
+        at = v.parent_view();
+    }
+    false
+}
+
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it,
 /// unless a text field or selectable text is nearer: that shows its edit
-/// menu.
+/// menu, but where its selectable view, or a view between them, listens
+/// ([`selectable_menu_is_the_apps`]).
 fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     let Some(hit) = pick(&surface.root, x, y, true) else {
         return;
@@ -758,7 +780,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             crate::text_input::context_menu(surface, &v);
             return;
         }
-        if selectable || area {
+        if (selectable || area) && !selectable_menu_is_the_apps(&v) {
             // Text in a selectable view has the area's menu.
             match crate::selectable_view::area_of(&v) {
                 Some(area) => crate::selectable_view::context_menu(surface, &area),
@@ -2336,6 +2358,31 @@ mod tests {
     }
 
     use crate::geom::rect;
+
+    /// Selectable text shows its edit menu, unless its selectable view, or
+    /// a view between them, listens to `onContextMenu`, which hears the
+    /// menu asked for instead; a listener around the selectable view does
+    /// not take it.
+    #[test]
+    fn a_selectable_views_listener_takes_its_texts_menu() {
+        let root = root();
+        let row = view(&root, 2, ViewKind::View, rect(0.0, 0.0, 200.0, 100.0));
+        let area = view(&row, 4, ViewKind::View, rect(0.0, 0.0, 200.0, 100.0));
+        area.state_mut().props.selectable_view = true;
+        let block = view(&area, 6, ViewKind::View, rect(0.0, 0.0, 200.0, 40.0));
+        let text = view(&block, 8, ViewKind::Text, rect(0.0, 0.0, 200.0, 20.0));
+        assert!(!selectable_menu_is_the_apps(&text));
+        row.state_mut().events.set(EventKind::ContextMenu, true);
+        assert!(!selectable_menu_is_the_apps(&text));
+        area.state_mut().events.set(EventKind::ContextMenu, true);
+        assert!(selectable_menu_is_the_apps(&text));
+        area.state_mut().events.set(EventKind::ContextMenu, false);
+        block.state_mut().events.set(EventKind::ContextMenu, true);
+        assert!(selectable_menu_is_the_apps(&text));
+        // Selectable text in no selectable view keeps its own menu.
+        let alone = view(&row, 10, ViewKind::Text, rect(0.0, 50.0, 200.0, 20.0));
+        assert!(!selectable_menu_is_the_apps(&alone));
+    }
 
     #[test]
     fn picks_the_innermost_topmost_view() {
