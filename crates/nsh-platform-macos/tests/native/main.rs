@@ -31,6 +31,8 @@ mod window_frames;
 mod window_hover;
 #[cfg(target_os = "macos")]
 mod window_press;
+#[cfg(target_os = "macos")]
+mod menu_labels;
 fn main() {
     if !std::env::args().any(|arg| arg == "--ignored") {
         println!("Native AppKit checks skipped; run with --ignored in a desktop session.");
@@ -58,6 +60,7 @@ fn main() {
                 window_dialog::run();
                 window_frames::run();
                 ime::run();
+                menu_labels::run();
                 input_hidden::run();
                 mount::run();
                 // Last: it makes the process an accessory app.

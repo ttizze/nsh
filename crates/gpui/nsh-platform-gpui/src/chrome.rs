@@ -400,6 +400,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             };
             menus::open(surface, menus::Kind::App, items.clone(), anchor, false);
         }
+        DesktopCommand::SetMenuLabels(_) => {}
         // The host app owns the tray and global shortcuts.
         DesktopCommand::SetTray(_)
         | DesktopCommand::RegisterGlobalShortcut { .. }
