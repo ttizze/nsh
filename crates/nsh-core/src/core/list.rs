@@ -1169,7 +1169,9 @@ impl ListState {
     /// when the end moves away while they are within the threshold of it
     /// (a growing last item, a shrinking viewport); scrolled further up,
     /// they keep what is visible (content grows below it).
-    pub(super) fn anchor_end(&mut self) -> f32 {
+    /// `anchored` already moved the offset to preserve visible rows: test
+    /// the distance from the old end before that movement.
+    pub(super) fn anchor_end(&mut self, anchored: f32) -> f32 {
         if self.viewport <= 0.0 {
             return 0.0;
         }
@@ -1179,7 +1181,7 @@ impl ListState {
                 return 0.0;
             };
             let was = std::mem::replace(&mut self.anchored_end, end);
-            if was.is_nan() || end <= was || was - self.offset > threshold {
+            if was.is_nan() || end <= was || was - (self.offset - anchored) > threshold {
                 return 0.0;
             }
             let delta = end - self.offset;
@@ -1745,7 +1747,7 @@ mod tests {
         let mut l = list(100, 50.0, 400.0);
         l.set_inverted(true);
         l.loads_at_start = true;
-        l.anchor_end();
+        l.anchor_end(0.0);
         let mut binds = Vec::new();
         // Opens at its start (item 0 at the bottom): no event.
         assert!(!l.update_window(&mut binds).start);
@@ -1758,33 +1760,33 @@ mod tests {
         let on_screen = |l: &ListState, i: u32| l.to_content(l.item_at(i), 50.0) - l.offset;
         let before = on_screen(&l, 4);
         l.splice(0, 0, 4);
-        let scrolled = l.take_splice_anchor() + l.anchor_end();
+        let scrolled = l.take_splice_anchor() + l.anchor_end(0.0);
         assert_eq!(scrolled, 0.0);
         assert_eq!(on_screen(&l, 8), before);
         // So does their measuring.
         let offset = l.offset;
         let anchor = l.measured(0, 80.0);
         l.offset += anchor;
-        assert_eq!(anchor + l.anchor_end(), 0.0);
+        assert_eq!(anchor + l.anchor_end(0.0), 0.0);
         assert_eq!(l.offset, offset);
         // At the start, what arrives there shows (a chat's new message).
         let mut c = list(100, 50.0, 400.0);
         c.set_inverted(true);
         c.loads_at_start = true;
-        c.anchor_end();
+        c.anchor_end(0.0);
         c.splice(0, 0, 1);
         c.take_splice_anchor();
-        c.anchor_end();
+        c.anchor_end(0.0);
         assert_eq!(c.natural_offset(), 0.0);
         // Without `onLoadMoreAtStart`, an inverted list keeps its distance
         // from the end wherever it is, as it always did.
         let mut d = list(100, 50.0, 400.0);
         d.set_inverted(true);
-        d.anchor_end();
+        d.anchor_end(0.0);
         d.reported(5000.0 - 400.0 - 200.0, 0);
         d.splice(0, 0, 4);
         assert_eq!(d.take_splice_anchor(), 0.0);
-        d.anchor_end();
+        d.anchor_end(0.0);
         assert_eq!(d.natural_offset(), 200.0);
     }
 
@@ -1871,23 +1873,23 @@ mod tests {
     fn lists_follow_the_end_within_the_threshold() {
         let mut l = list(100, 50.0, 400.0);
         l.set_follow_end(Some(10.0));
-        assert_eq!(l.anchor_end(), 0.0, "starts where it is");
+        assert_eq!(l.anchor_end(0.0), 0.0, "starts where it is");
         // At the end: the last item grows by 30, the list follows.
         l.offset = 5000.0 - 400.0;
         l.measured(99, 80.0);
-        assert_eq!(l.anchor_end(), 30.0);
+        assert_eq!(l.anchor_end(0.0), 30.0);
         assert_eq!(l.offset, 5030.0 - 400.0);
         // Scrolled up: it grows below what is visible, which stays.
         l.offset = 1000.0;
         l.measured(99, 120.0);
-        assert_eq!(l.anchor_end(), 0.0);
+        assert_eq!(l.anchor_end(0.0), 0.0);
         assert_eq!(l.offset, 1000.0);
         // Without the option, nothing follows.
         let mut m = list(100, 50.0, 400.0);
-        m.anchor_end();
+        m.anchor_end(0.0);
         m.offset = 5000.0 - 400.0;
         m.measured(99, 80.0);
-        assert_eq!(m.anchor_end(), 0.0);
+        assert_eq!(m.anchor_end(0.0), 0.0);
     }
 
     #[test]
@@ -1895,7 +1897,7 @@ mod tests {
         let mut l = list(100, 50.0, 400.0);
         l.set_inverted(true);
         // Starts scrolled to the end; item 0 is at the bottom.
-        assert_eq!(l.anchor_end(), 5000.0 - 400.0);
+        assert_eq!(l.anchor_end(0.0), 5000.0 - 400.0);
         assert_eq!(l.to_content(l.item_at(0), 50.0), 4950.0);
         let mut binds = Vec::new();
         l.update_window(&mut binds);
@@ -1903,13 +1905,13 @@ mod tests {
         assert!(binds.iter().all(|b| b.1 <= 16));
         // Older items load (appended): the visible content stays put.
         l.set_count(120);
-        assert_eq!(l.anchor_end(), 1000.0);
+        assert_eq!(l.anchor_end(0.0), 1000.0);
         assert_eq!(l.offset, 5600.0);
         assert_eq!(l.to_content(l.item_at(0), 50.0), 5950.0);
         // A short list sits at the bottom.
         let mut s = list(2, 50.0, 400.0);
         s.set_inverted(true);
-        s.anchor_end();
+        s.anchor_end(0.0);
         assert_eq!(s.offset, 0.0);
         assert_eq!(s.to_content(s.item_at(0), 50.0), 350.0);
     }
