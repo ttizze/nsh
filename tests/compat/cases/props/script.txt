@@ -98,6 +98,11 @@ expect Feed 0
 scroll scroll:text:"Feed 0" 0 200
 tap id:add
 prop scroll:text:"Feed 9" contentOffset y=240
+# Scrolled away, measuring a taller row above the viewport preserves the
+# reader's position; anchoring must not make it start following again.
+scroll scroll:text:"Feed 9" 0 -100
+tap id:grow-first
+prop scroll:text:"Feed 9" contentOffset y=440
 # Fully visible items only count as viewable: 0 and 1 of the 100 points,
 # not 2, half shown.
 expect Viewable: 0,1

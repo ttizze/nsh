@@ -3541,6 +3541,43 @@ fn scroll_commands_follow_their_target_as_rows_are_measured() {
 }
 
 #[test]
+fn measuring_above_the_viewport_does_not_resume_following_the_end() {
+    let mut c = core();
+    estimated_list(&mut c);
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::FollowEnd(Some(px(0.0))),
+    })
+    .unwrap();
+    c.commit();
+    let (mut next_id, mut cells) = (100, Vec::new());
+    render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+    c.commit();
+    // The reader is 200 pt from the end. A recycled row entirely above
+    // the viewport grows by 600 pt as its native content is measured.
+    let at = 5000.0 - 400.0 - 200.0;
+    c.set_scroll_offset(2, point(px(0.0), px(at)), u32::MAX);
+    c.commit();
+    render_binds(&mut c, &mut next_id, &mut cells, 50.0);
+    c.commit();
+    let key = c.key(2).unwrap();
+    let list = c.nodes[key as usize].list.as_ref().unwrap();
+    let cell = list
+        .slots
+        .iter()
+        .find(|s| s.ready().is_some_and(|i| list.item_at(i) + 50.0 <= at))
+        .unwrap()
+        .cell;
+    c.apply(style_op(
+        c.nodes[cell as usize].id,
+        &[("height", StyleValue::Number(650.0))],
+    ))
+    .unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(scrolled(&batch, at), at + 600.0);
+}
+
+#[test]
 fn animated_scroll_commands_retarget_while_rows_are_measured() {
     let mut c = core();
     estimated_list(&mut c);
