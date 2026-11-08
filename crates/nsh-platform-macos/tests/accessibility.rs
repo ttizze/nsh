@@ -13,17 +13,25 @@ fn main() {}
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use std::time::{Duration, Instant};
+    use std::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::{Duration, Instant},
+    };
 
     use nsh_core::{element::Root, prelude::*};
     use nsh_platform_macos::{
         AppOptions, AppView,
-        objc2::{MainThreadMarker, MainThreadOnly, Message, rc::Retained},
+        objc2::{
+            MainThreadMarker, MainThreadOnly, Message, msg_send, rc::Retained, runtime::AnyObject,
+        },
         objc2_app_kit::{
             NSAccessibility, NSApplication, NSBackingStoreType, NSView, NSWindow, NSWindowStyleMask,
         },
-        objc2_foundation::{NSDate, NSPoint, NSRect, NSRunLoop, NSSize},
+        objc2_foundation::{NSDate, NSNumber, NSPoint, NSRect, NSRunLoop, NSSize, NSString},
     };
+
+    /// The test sets it to scroll the scroll area to its end.
+    static SCROLLED: AtomicBool = AtomicBool::new(false);
 
     /// A scroll view and a plain view, each holding two texts made bottom
     /// first, as a list's recycled cells can be.
@@ -48,6 +56,23 @@ mod macos {
                     .h(px(80.0))
                     .children(two("plain-second", "plain-first")),
             )
+            .child(scroll_area())
+    }
+
+    /// A scroll view whose content is three times its height.
+    #[component]
+    fn ScrollArea() -> impl IntoElement {
+        let area = element_ref();
+        set_interval(Duration::from_millis(20), move || {
+            if SCROLLED.swap(false, Ordering::SeqCst) {
+                area.scroll_to_end(false);
+            }
+        });
+        scroll()
+            .element_ref(&area)
+            .test_id("scroll-area")
+            .h(px(50.0))
+            .child(view().h(px(150.0)))
     }
 
     /// Runs the main run loop until `done` holds, for at most 5 s.
@@ -85,6 +110,20 @@ mod macos {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// The role and value of the accessibility element `object`.
+    fn role_and_value(object: &AnyObject) -> (Option<String>, Option<f64>) {
+        // SAFETY: NSAccessibility getters, sent to an element on the main
+        // thread.
+        let role: Option<Retained<NSString>> = unsafe { msg_send![object, accessibilityRole] };
+        let value: Option<Retained<AnyObject>> = unsafe { msg_send![object, accessibilityValue] };
+        (
+            role.map(|r| r.to_string()),
+            value
+                .and_then(|v| v.downcast::<NSNumber>().ok())
+                .map(|n| n.as_f64()),
+        )
     }
 
     pub(super) fn run() {
@@ -125,6 +164,33 @@ mod macos {
             ["scrolled-first", "scrolled-second"]
         );
         assert_eq!(children_of(&root, "plain"), ["plain-second", "plain-first"]);
+
+        // A scroll view is a scroll area, its scroll bar on its axis telling
+        // where it is scrolled to, from 0 at the start to 1 at the end.
+        let area = view_with_id(&root, "scroll-area").expect("the scroll area");
+        assert_eq!(
+            area.accessibilityRole().map(|r| r.to_string()).as_deref(),
+            Some("AXScrollArea")
+        );
+        assert!(area.accessibilityHorizontalScrollBar().is_none());
+        let bar = area
+            .accessibilityVerticalScrollBar()
+            .expect("a vertical bar");
+        assert_eq!(
+            role_and_value(&bar),
+            (Some("AXScrollBar".into()), Some(0.0))
+        );
+        let children = area.accessibilityChildren().expect("children");
+        assert!(
+            children
+                .iter()
+                .any(|c| std::ptr::eq(&*c as *const AnyObject, &*bar as *const AnyObject)),
+            "the bar is among the children"
+        );
+        SCROLLED.store(true, Ordering::SeqCst);
+        until("the bar's value at the end", || {
+            role_and_value(&bar).1 == Some(1.0)
+        });
 
         app.stop();
         window.close();

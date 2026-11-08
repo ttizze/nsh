@@ -760,10 +760,27 @@ define_class!(
             if hides {
                 Some(NSArray::new())
             } else {
+                let view = NshView(self.retain());
                 // SAFETY: NSView's own children.
                 let all = unsafe { msg_send![super(self), accessibilityChildren] };
-                crate::access::in_reading_order(&NshView(self.retain()), all)
+                crate::access::scroll_bar::with_bar(
+                    &view,
+                    crate::access::in_reading_order(&view, all),
+                )
             }
+        }
+
+        // A scroll area's bar on its axis ([`crate::access::scroll_bar`]).
+        #[unsafe(method_id(accessibilityVerticalScrollBar))]
+        fn accessibility_vertical_scroll_bar(&self) -> Option<Retained<AnyObject>> {
+            crate::access::scroll_bar::bar(&NshView(self.retain()), true)
+                .map(|bar| bar.into_super().into_super().into_super())
+        }
+
+        #[unsafe(method_id(accessibilityHorizontalScrollBar))]
+        fn accessibility_horizontal_scroll_bar(&self) -> Option<Retained<AnyObject>> {
+            crate::access::scroll_bar::bar(&NshView(self.retain()), false)
+                .map(|bar| bar.into_super().into_super().into_super())
         }
 
         #[unsafe(method(viewDidMoveToSuperview))]

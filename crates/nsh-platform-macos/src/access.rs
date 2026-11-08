@@ -23,6 +23,9 @@
 //! A scroll view's children, and a list's in its parent's viewport, are
 //! read in the order they are on screen ([`in_reading_order`]).
 //!
+//! A scroll view is a scroll area (`AXScrollArea`) with a scroll bar on its
+//! axis whose value is where it is scrolled to ([`scroll_bar`]).
+//!
 //! Live regions are emulated by announcing a changed label or text
 //! (`NSAccessibilityAnnouncementRequestedNotification`);
 //! `AXPress` presses a view that takes presses, as Return does when it
@@ -32,6 +35,8 @@
 //! Every update is diffed against what was last given to AppKit
 //! ([`Applied`]): `ViewProps` also carries touch properties, and `Text`
 //! items come again on every relayout.
+
+pub(crate) mod scroll_bar;
 
 use std::sync::Arc;
 
@@ -65,6 +70,8 @@ pub(crate) struct Applied {
     /// all fifteen attributes per changed text is what a ticking table
     /// spends most of its main-thread time on.
     ax: AxState,
+    /// A scroll area's scroll bar, created only when an AX client asks.
+    scroll_bar: Option<Retained<scroll_bar::ScrollBar>>,
 }
 
 /// Whether the view hides its children from VoiceOver (`accessible={true}`,
@@ -185,6 +192,8 @@ enum Ax {
     MenuItem,
     Progress,
     ScrollBar,
+    /// A scroll view.
+    ScrollArea,
     SpinButton,
     Tab,
     TabList,
@@ -562,6 +571,7 @@ fn ax_role(role: Ax) -> (Option<Retained<NSString>>, Option<Retained<NSString>>)
             Ax::MenuItem => (constant(NSAccessibilityMenuItemRole), None),
             Ax::Progress => (constant(NSAccessibilityProgressIndicatorRole), None),
             Ax::ScrollBar => (constant(NSAccessibilityScrollBarRole), None),
+            Ax::ScrollArea => (constant(NSAccessibilityScrollAreaRole), None),
             Ax::SpinButton => (constant(NSAccessibilityIncrementorRole), None),
             Ax::Tab => (
                 constant(NSAccessibilityRadioButtonRole),
@@ -696,6 +706,7 @@ fn base_role(a: &Accessibility, kind: ViewKind, pressable: bool) -> Ax {
             ViewKind::Image if a.label.is_some() => Ax::Image,
             _ if a.accessible == Some(false) => Ax::Generic,
             _ if pressable => Ax::Button,
+            ViewKind::Scroll => Ax::ScrollArea,
             _ if a.label.is_some() || a.accessible == Some(true) => Ax::Group,
             _ => Ax::Generic,
         },
@@ -789,6 +800,7 @@ mod tests {
         assert_eq!(role_for(&none, ViewKind::Text, false), Ax::Text);
         assert_eq!(role_for(&none, ViewKind::View, true), Ax::Button);
         assert_eq!(role_for(&none, ViewKind::Image, false), Ax::Generic);
+        assert_eq!(role_for(&none, ViewKind::Scroll, false), Ax::ScrollArea);
         let not_element = Accessibility {
             accessible: Some(false),
             ..Default::default()
