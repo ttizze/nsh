@@ -50,8 +50,11 @@ final class InputBox extends FrameLayout implements Node {
     private int pendingCount;
     /** Inside the text watcher, where replacing the text would corrupt the IME's edit. */
     private boolean watching;
-    /** `pasteBehavior` is `"insert"`: a paste inserts its text. */
-    boolean pasteInserts = true;
+    /**
+     * `pasteBehavior`: 1 (`"insert"`) a paste inserts its text, 0 (`"report"`)
+     * nothing, 2 (`"reportFiles"`) nothing when it holds images or files.
+     */
+    int pasteBehavior = 1;
     /** Whether the EditText shows a vertical scroll bar of its own by default. */
     private final boolean defaultVerticalBar;
     /**
@@ -136,7 +139,7 @@ final class InputBox extends FrameLayout implements Node {
                     android.content.ClipboardManager board = (android.content.ClipboardManager)
                             getContext().getSystemService(Context.CLIPBOARD_SERVICE);
                     android.content.ClipData clip = board == null ? null : board.getPrimaryClip();
-                    if (clip != null && pasted(clip) && !pasteInserts) return true;
+                    if (clip != null && pasted(clip) && !inserts(clip)) return true;
                 }
                 return super.onTextContextMenuItem(item);
             }
@@ -255,8 +258,9 @@ final class InputBox extends FrameLayout implements Node {
         if (source != android.view.ContentInfo.SOURCE_CLIPBOARD
                 && source != android.view.ContentInfo.SOURCE_INPUT_METHOD) return payload;
         // Without a listener a paste that inserts is the EditText's own.
-        if (!pasted(payload.getClip()) && pasteInserts) return payload;
-        if (!pasteInserts) return null;
+        boolean inserts = inserts(payload.getClip());
+        if (!pasted(payload.getClip()) && inserts) return payload;
+        if (!inserts) return null;
         // The text goes on to the EditText; what else there was is consumed.
         android.content.ClipData clip = payload.getClip();
         android.content.ClipData text = null;
@@ -305,6 +309,20 @@ final class InputBox extends FrameLayout implements Node {
             }
         }
         mounter.paste(id, text.toString(), images.toArray(new byte[0][]), uris.toArray(new String[0]));
+        return true;
+    }
+
+    /** Whether a paste of {@code clip} inserts its text (`pasteBehavior`). */
+    boolean inserts(android.content.ClipData clip) {
+        if (pasteBehavior != 2) return pasteBehavior != 0;
+        android.content.ContentResolver resolver = getContext().getContentResolver();
+        for (int i = 0; i < clip.getItemCount(); i++) {
+            android.net.Uri uri = clip.getItemAt(i).getUri();
+            if (uri == null) continue;
+            if ("file".equals(uri.getScheme())) return false;
+            String type = resolver.getType(uri);
+            if (type != null && type.startsWith("image/")) return false;
+        }
         return true;
     }
 

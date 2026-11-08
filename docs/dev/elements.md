@@ -344,8 +344,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   the clipboard, images: `PastedFile`s whose bytes become JS `File`s in `nsh-js` `payload_object`, never a JS string
   or base64) and `uris` (local files' `file:` URLs, as `onFileDrop`'s). The platform reads the clipboard in the
   paste's own handler, on the user's paste only, and only when the app listens. Whether the input inserts the text is
-  answered at once from `pasteBehavior` (`InputConfig::paste_behavior`: `"insert"`, the default, or `"report"`);
-  images and files are never inserted. The event comes before the `onChangeText` of the text it inserts (Linux:
+  answered at once from `pasteBehavior` (`InputConfig::paste_behavior`: `"insert"`, the default, `"report"`, or
+  `"reportFiles"`, which inserts the text unless the paste holds images or files: `PasteBehavior::inserts`, from
+  what the clipboard holds at the paste); images and files are never inserted. The event comes before the `onChangeText` of the text it inserts (Linux:
   after, GTK reads clipboards asynchronously). Where Paste is offered, it is offered for images and files too while
   the app listens. iOS: `Field` / `Area` override `paste:` (`system::pasted`: strings, `IMAGE_TYPES` data else
   `UIImage` PNGs, file URLs) and `canPerformAction:withSender:`; Android: `setOnReceiveContentListener` (API 31;

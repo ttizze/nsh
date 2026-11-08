@@ -1137,6 +1137,23 @@ pub enum PasteBehavior {
     /// Inserts nothing: the app does what it wants with `onPaste`'s text,
     /// images and files.
     Report,
+    /// Inserts the pasted text unless the paste holds images or files
+    /// (`onPaste`'s `files` or `uris`): then it inserts nothing, and the
+    /// app attaches them, as chat apps do with a copied image whose
+    /// clipboard also has its name or address as text.
+    ReportFiles,
+}
+
+impl PasteBehavior {
+    /// Whether a paste inserts its text: `files` when it holds images or
+    /// files.
+    pub fn inserts(self, files: bool) -> bool {
+        match self {
+            PasteBehavior::Insert => true,
+            PasteBehavior::Report => false,
+            PasteBehavior::ReportFiles => !files,
+        }
+    }
 }
 
 /// A bar button UIKit draws itself, with the system's look, symbol or

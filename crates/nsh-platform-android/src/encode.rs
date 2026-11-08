@@ -1340,8 +1340,13 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     });
     e.bool(c.rtl);
     e.bool(c.caret_hidden);
-    // `pasteBehavior`: whether a paste inserts its text.
-    e.bool(c.paste_behavior == nsh_core::PasteBehavior::Insert);
+    // `pasteBehavior`: 1 a paste inserts its text, 0 it inserts nothing, 2
+    // it inserts nothing when it holds images or files.
+    e.int(match c.paste_behavior {
+        nsh_core::PasteBehavior::Insert => 1,
+        nsh_core::PasteBehavior::Report => 0,
+        nsh_core::PasteBehavior::ReportFiles => 2,
+    });
     // A multiline input's own scroll bar shows; a built-in bar replaces it
     // (the input then reports how far its text scrolled).
     e.bool(c.scrollbar_visible);

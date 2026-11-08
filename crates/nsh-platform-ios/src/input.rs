@@ -46,8 +46,8 @@ pub(crate) struct InputIvars {
     caret: Cell<Bounds<Points>>,
     /// The app listens to pastes (`onPaste`).
     paste_listens: Cell<bool>,
-    /// A paste inserts its text (`pasteBehavior`).
-    paste_inserts: Cell<bool>,
+    /// What a paste does (`pasteBehavior`).
+    paste_behavior: Cell<nsh_core::PasteBehavior>,
     /// A built-in bar of the app's takes the text area's scroll indicator's
     /// place (`InputConfig::replaced`): its scrolling is reported.
     scroll_replaced: Cell<bool>,
@@ -71,7 +71,7 @@ impl Default for InputIvars {
             line_break: Cell::new(false),
             caret: Cell::new(Bounds::default()),
             paste_listens: Cell::new(false),
-            paste_inserts: Cell::new(true),
+            paste_behavior: Cell::new(nsh_core::PasteBehavior::Insert),
             scroll_replaced: Cell::new(false),
             scroll_reported: Cell::new(None),
         }
@@ -376,12 +376,18 @@ fn pasting(view: &UIView, ivars: &InputIvars) -> bool {
 
 /// [`pasting`] from `board`.
 fn pasting_from(view: &UIView, ivars: &InputIvars, board: &objc2_ui_kit::UIPasteboard) -> bool {
-    if ivars.paste_listens.get() {
+    let (listens, behavior) = (ivars.paste_listens.get(), ivars.paste_behavior.get());
+    // Whether it holds images or files, where the behavior asks.
+    let mut files = false;
+    if listens || behavior == nsh_core::PasteBehavior::ReportFiles {
         let paste = crate::system::pasted(board);
-        report_paste(view, paste);
+        files = !paste.files.is_empty() || !paste.uris.is_empty();
+        if listens {
+            report_paste(view, paste);
+        }
     }
     // SAFETY: a plain getter (no paste notice).
-    ivars.paste_inserts.get() && unsafe { board.hasStrings() }
+    behavior.inserts(files) && unsafe { board.hasStrings() }
 }
 
 /// A test's paste (`nsh test --target ios`): `content` on a pasteboard of
@@ -506,15 +512,15 @@ pub(crate) fn report_scroll(view: &UIView, control: &EngineControl) {
 }
 
 /// The paste settings of input view `view` (`onPaste` listened,
-/// `pasteBehavior` inserts).
-fn set_paste(view: &UIView, listens: bool, inserts: bool) {
+/// `pasteBehavior`).
+fn set_paste(view: &UIView, listens: bool, behavior: nsh_core::PasteBehavior) {
     let ivars = view
         .downcast_ref::<Field>()
         .map(|f| f.ivars())
         .or_else(|| view.downcast_ref::<Area>().map(|a| a.ivars()));
     if let Some(ivars) = ivars {
         ivars.paste_listens.set(listens);
-        ivars.paste_inserts.set(inserts);
+        ivars.paste_behavior.set(behavior);
     }
 }
 
@@ -784,11 +790,11 @@ impl Input {
     /// images and files then, and what is pasted is read and reported.
     pub(crate) fn set_paste_listens(&mut self, listens: bool) {
         self.paste_listens = listens;
-        let inserts = self
+        let behavior = self
             .config
             .as_ref()
-            .is_none_or(|c| c.paste_behavior == nsh_core::PasteBehavior::Insert);
-        set_paste(self.editor_view(), listens, inserts);
+            .map_or(nsh_core::PasteBehavior::Insert, |c| c.paste_behavior);
+        set_paste(self.editor_view(), listens, behavior);
     }
 
     /// Selects `start..end` of the text.
@@ -882,7 +888,7 @@ impl Input {
         set_paste(
             self.editor_view(),
             self.paste_listens,
-            config.paste_behavior == nsh_core::PasteBehavior::Insert,
+            config.paste_behavior,
         );
         let first = self.config.is_none();
         let auto_focus = config.auto_focus;

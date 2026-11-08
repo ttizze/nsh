@@ -1965,10 +1965,10 @@ final class Mounter {
         String autofill = optString(b, objects);
         boolean inputRtl = b.getInt() != 0;
         boolean caretHidden = b.getInt() != 0;
-        boolean pasteInserts = b.getInt() != 0;
+        int pasteBehavior = b.getInt();
         boolean scrollbarVisible = b.getInt() != 0, replaced = b.getInt() != 0;
         if (!(v instanceof InputBox)) return;
-        ((InputBox) v).pasteInserts = pasteInserts;
+        ((InputBox) v).pasteBehavior = pasteBehavior;
         ((InputBox) v).setScrollbar(scrollbarVisible, replaced);
         ((InputBox) v).edit.setCursorVisible(!caretHidden);
         ((InputBox) v).setAutofill(autofill);

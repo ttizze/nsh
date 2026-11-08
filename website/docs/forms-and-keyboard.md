@@ -183,7 +183,7 @@ In Rust, each prop is a method of `input()` named in snake case (`.placeholder(.
 | `readonly` | `boolean` | `false` | The user can select and copy the text but not change it. |
 | `autoFocus` | `boolean` | `false` | Focused when it appears. |
 | `submitBehavior` | `"submit" \| "blurAndSubmit" \| "newline"` | single line `"blurAndSubmit"`, multiline `"newline"` | What return does: submit and keep the focus, submit and unfocus, or insert a line break (multiline only). |
-| `pasteBehavior` | `"insert" \| "report"` | `"insert"` | What a paste does: insert its text, or nothing ([pasting](#pasting-images-and-files)). |
+| `pasteBehavior` | `"insert" \| "report" \| "reportFiles"` | `"insert"` | What a paste does: insert its text, nothing, or its text unless it holds images or files ([pasting](#pasting-images-and-files)). |
 | `caret` | `boolean` | `true` | The caret is drawn; `false` hides it. |
 | `ios={{ keyboardAppearance }}` | `"default" \| "light" \| "dark"` | `"default"` | The keyboard's look (iOS). |
 | `selectedRange` | `{ start: number; end?: number }` | | The controlled selection, in UTF-16 units. |
@@ -519,7 +519,9 @@ The platform reads the clipboard as the user pastes, and only then.
 The input inserts the pasted text by itself, as it always does: the event comes before the `onChange` of that text.
 Images and files are never inserted, since an input holds text. With `pasteBehavior` `"report"` the input inserts
 nothing, and the app decides what a paste does: send a long text as an attachment, or insert a cleaned-up version.
-The input decides at once, from the prop, because the system asks it on the spot.
+With `"reportFiles"` the input inserts the text of a paste that holds only text, and nothing of one that holds images
+or files: a copied image often comes with its name or address as text, and a chat app attaches the image alone. The
+input decides at once, from the prop, because the system asks it on the spot, so the system's undo stays as it is.
 
 ```rust tabs
 let attachments = signal(Vec::<PastedFile>::new());
