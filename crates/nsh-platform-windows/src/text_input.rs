@@ -860,8 +860,12 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
         return;
     }
     if let Some(old) = &old {
+        let input = input_of(old);
+        if let Some(input) = &input {
+            commit_composition(surface, old, input);
+        }
         cancel_composition(surface);
-        if let Some(input) = input_of(old) {
+        if let Some(input) = input {
             input.focused.set(false);
             input.drag.set(None);
             input.model.borrow_mut().composition = None;
@@ -926,6 +930,24 @@ fn with_context<R>(hwnd: HWND, f: impl FnOnce(HIMC) -> R) -> Option<R> {
         let r = f(himc);
         let _ = ImmReleaseContext(hwnd, himc);
         Some(r)
+    }
+}
+
+/// Leaving field `view` commits what the IME composes in it, as a
+/// browser's blur does: the composed text is inserted as the IME's commit
+/// inserts it (reported before the composition's end), and the IME's
+/// session is dropped after it ([`cancel_composition`]).
+fn commit_composition(surface: &Surface, view: &NshView, input: &InputState) {
+    let composed = input
+        .model
+        .borrow()
+        .composition
+        .as_ref()
+        .map(|c| c.text.clone())
+        .filter(|text| !text.is_empty());
+    if let Some(text) = composed {
+        input.model.borrow_mut().composition = Some(Composition::default());
+        insert(surface, view, input, &text, false);
     }
 }
 
