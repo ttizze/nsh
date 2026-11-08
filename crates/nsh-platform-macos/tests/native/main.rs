@@ -18,6 +18,8 @@ mod embedded_scroll;
 #[cfg(target_os = "macos")]
 mod input_hidden;
 #[cfg(target_os = "macos")]
+mod menu_labels;
+#[cfg(target_os = "macos")]
 mod mount;
 #[cfg(target_os = "macos")]
 mod press_momentum;
@@ -58,6 +60,7 @@ fn main() {
                 window_dialog::run();
                 window_frames::run();
                 ime::run();
+                menu_labels::run();
                 input_hidden::run();
                 mount::run();
                 // Last: it makes the process an accessory app.
