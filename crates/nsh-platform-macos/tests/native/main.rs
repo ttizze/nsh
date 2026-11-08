@@ -17,6 +17,8 @@ mod ime;
 #[cfg(target_os = "macos")]
 mod input_hidden;
 #[cfg(target_os = "macos")]
+mod menu_labels;
+#[cfg(target_os = "macos")]
 mod mount;
 #[cfg(target_os = "macos")]
 mod title_bar;
@@ -46,6 +48,7 @@ fn main() {
                 title_bar::run();
                 window_dialog::run();
                 ime::run();
+                menu_labels::run();
                 input_hidden::run();
                 mount::run();
             }
