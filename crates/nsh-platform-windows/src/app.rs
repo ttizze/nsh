@@ -10,7 +10,7 @@ use std::{
 };
 
 use nsh_core::{
-    desktop::{Backdrop, MainWindowOptions, WindowMode, WindowPlacement, WindowPosition},
+    desktop::{MenuLabels, Backdrop, MainWindowOptions, WindowMode, WindowPlacement, WindowPosition},
     geometry::{Size, px},
     platform::{Appearance, Locale},
 };
@@ -205,6 +205,11 @@ pub struct AppOptions {
     /// the app (`Application.on("openFiles", ...)`), a later
     /// launch with files handing them to the running instance.
     pub file_types: Vec<nsh_core::file_type::FileType>,
+    /// The labels of the menus the view makes in the app's language: the
+    /// edit menus of its text fields and selectable text, and the items
+    /// with a role and no label of their own in the app's menus. English
+    /// for what it does not label.
+    pub menu_labels: MenuLabels,
 }
 
 impl Default for AppOptions {
@@ -230,6 +235,7 @@ impl Default for AppOptions {
             file_types: Vec::new(),
             notifications: false,
             host: nsh_engine::HostChannel::default(),
+            menu_labels: MenuLabels::default(),
         }
     }
 }
@@ -294,6 +300,7 @@ impl AppView {
                 options.icon.as_deref(),
             );
         }
+        surface.chrome.labels.replace(options.menu_labels.clone());
         register_app_components(&options.components);
         surface.native.set_components(options.components.clone());
         surface.native.set_app_id(&options.app_id);

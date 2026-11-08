@@ -1701,6 +1701,7 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
             }
         })
     };
+    let delete = surface.chrome.labels.borrow().delete.clone();
     let paste_action: Action = {
         let view = view.clone();
         Rc::new(move |s: &Rc<Surface>| {
@@ -1709,10 +1710,10 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
             }
         })
     };
-    let item = |role: Option<MenuRole>, label: &'static str, enabled: bool, action: Action| {
+    let item = |role: Option<MenuRole>, label: &str, enabled: bool, action: Action| {
         LocalItem::Item {
             role,
-            label,
+            label: label.to_owned(),
             enabled,
             action,
         }
