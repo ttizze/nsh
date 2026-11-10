@@ -54,8 +54,8 @@ use super::{
 use crate::{
     Command, EventKind, EventPayload,
     desktop::{
-        self, CloseReason, DesktopCommand, Display, DisplayId, MenuAction, MenuBarMode, MenuLabels, MenuRole,
-        Shortcut, TrayTitlePlacement, TrayTitleRun, WindowAttributes, WindowCloseCause,
+        self, CloseReason, DesktopCommand, Display, DisplayId, MenuAction, MenuBarMode, MenuLabels,
+        MenuRole, Shortcut, TrayTitlePlacement, TrayTitleRun, WindowAttributes, WindowCloseCause,
         WindowEvent, WindowFrame, WindowKind, WindowMode, WindowOptions, WindowPlacement,
         WindowPosition, WindowRequest, WindowState,
     },

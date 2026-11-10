@@ -46,6 +46,8 @@ const SIDE: Points = Points(18.0);
 struct Item {
     /// The surface whose app set it, which its reports go to.
     owner: u64,
+    /// What the app set, made again with new labels ([`relabel`]).
+    tray: Tray,
     status: Retained<NSStatusItem>,
     /// The button's target (it does not retain it).
     target: Retained<TrayTarget>,
@@ -111,6 +113,7 @@ pub(crate) fn set(surface: &Surface, tray: Option<&Tray>) {
             NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
         Item {
             owner: surface.key(),
+            tray: tray.clone(),
             status,
             // SAFETY: NSObject's initializer.
             target: unsafe { msg_send![super(TrayTarget::alloc(mtm).set_ivars(())), init] },
@@ -122,6 +125,7 @@ pub(crate) fn set(surface: &Surface, tray: Option<&Tray>) {
         }
     });
     item.owner = surface.key();
+    item.tray = tray.clone();
     item.menu = menu;
     item.menu_icons = loads;
     item.click = tray.click;
@@ -210,6 +214,19 @@ fn set_title(button: &NSStatusBarButton, title: &[TrayTitleRun], position: TrayT
         TrayTitlePlacement::Right => NSCellImagePosition::ImageLeft,
         TrayTitlePlacement::Left => NSCellImagePosition::ImageRight,
     });
+}
+
+/// `surface`'s labels changed: the menu of its tray, if it set the tray,
+/// is made again with them.
+pub(crate) fn relabel(surface: &Surface) {
+    let tray = ITEM.with_borrow(|i| {
+        i.as_ref()
+            .filter(|i| i.owner == surface.key())
+            .map(|i| i.tray.clone())
+    });
+    if let Some(tray) = tray {
+        set(surface, Some(&tray));
+    }
 }
 
 /// Gives the item `icon` once it has loaded (now when it is in memory), or
