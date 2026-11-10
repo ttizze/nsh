@@ -336,9 +336,10 @@ impl VirtualList {
     }
 
     /// Scrolls to the end before the first frame, and stays there while
-    /// the rows in view are measured (a chat opening at its newest
-    /// message).
-    pub fn initial_scroll_to_end(mut self) -> Self {
+    /// the rows in view are measured: a chat opening at its newest message,
+    /// even one longer than the viewport (LegendList's
+    /// `initialScrollAtEnd`).
+    pub fn initial_scroll_at_end(mut self) -> Self {
         self.list().initial_scroll = Some(Command::ScrollToEnd { animated: false });
         self
     }

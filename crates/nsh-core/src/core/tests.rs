@@ -16224,7 +16224,7 @@ mod views {
                 text(format!("m{i}")).h(px(if i == 49 { 900.0 } else { 60.0 }))
             })
             .estimated_item_size(px(170.0))
-            .initial_scroll_to_end()
+            .initial_scroll_at_end()
             .flex_1(),
         )
     }
