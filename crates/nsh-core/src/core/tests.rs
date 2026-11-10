@@ -16214,6 +16214,74 @@ mod views {
         assert_eq!(sizes[3].1, sizes[sizes.len() - 1].1, "{sizes:?}");
     }
 
+    /// A chat of 50 messages estimated at 170 pt: 60 pt each, the newest
+    /// longer than the screen.
+    #[component]
+    fn Chat() -> impl IntoElement {
+        view().flex_1().child(
+            virtual_list(50, |at| {
+                let i = at.index();
+                text(format!("m{i}")).h(px(if i == 49 { 900.0 } else { 60.0 }))
+            })
+            .estimated_item_size(px(170.0))
+            .initial_scroll_to_end()
+            .flex_1(),
+        )
+    }
+
+    #[test]
+    fn a_list_opens_at_its_end_and_stays_there_as_rows_measure() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Chat>(|| ()));
+        let first = c.commit().unwrap();
+        let list = first
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::Scroll,
+                } => Some(*id),
+                _ => None,
+            })
+            .expect("a list");
+        let shown = |b: &MountBatch| -> Vec<String> {
+            b.items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Text { text, .. } => Some(text.text.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        // The first frame shows the newest message, not the first ones.
+        let texts = shown(&first);
+        assert!(texts.contains(&"m49".to_string()), "{texts:?}");
+        assert!(!texts.contains(&"m0".to_string()), "{texts:?}");
+        let to = |b: &MountBatch, at: f32| {
+            b.items.iter().fold(at, |at, item| match item {
+                MountItem::Command {
+                    id,
+                    command: Command::ScrollTo { y, .. },
+                } if *id == list => y.0,
+                MountItem::ScrollBy { id, dy, .. } if *id == list => at + dy.0,
+                _ => at,
+            })
+        };
+        let mut at = to(&first, 0.0);
+        while let Some(batch) = c.commit() {
+            at = to(&batch, at);
+        }
+        // At the end of the newest message, the rows above still estimated.
+        let content = c.nodes[c.key(list).unwrap() as usize]
+            .scroll
+            .as_ref()
+            .unwrap()
+            .content
+            .unwrap();
+        assert_eq!(at, (content.height - Points(480.0)).0);
+    }
+
     /// A text as its root.
     #[derive(Default)]
     struct Lit;
