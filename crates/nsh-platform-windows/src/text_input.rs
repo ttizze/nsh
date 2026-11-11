@@ -1944,22 +1944,19 @@ fn paste(surface: &Surface, view: &NshView, input: &InputState) {
     let text = crate::system::clipboard_text();
     let listens = view.state().events.contains(EventKind::Paste);
     let behavior = input.config.borrow().paste_behavior;
-    // Whether it holds images or files, where the behavior asks.
-    let mut files = false;
-    if listens || behavior == nsh_core::PasteBehavior::ReportFiles {
+    let files = behavior == nsh_core::PasteBehavior::ReportFiles
+        && (crate::system::clipboard_has_image() || crate::system::clipboard_has_files());
+    if listens {
         let mut paste = nsh_core::PasteEvent::new(text.clone().unwrap_or_default());
         if let Some(image) = crate::system::clipboard_image() {
             paste.files.push(nsh_core::PastedFile::image(image));
         }
         paste.uris = crate::system::clipboard_files();
-        files = !paste.files.is_empty() || !paste.uris.is_empty();
-        if listens {
-            surface.event(
-                view.id(),
-                EventKind::Paste,
-                EventPayload::Paste(Box::new(paste)),
-            );
-        }
+        surface.event(
+            view.id(),
+            EventKind::Paste,
+            EventPayload::Paste(Box::new(paste)),
+        );
     }
     if !behavior.inserts(files) {
         return;

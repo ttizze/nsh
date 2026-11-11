@@ -507,12 +507,17 @@ impl Ctx {
             let s = view.state();
             (s.id, s.events.contains(EventKind::Paste))
         };
-        if listens {
-            let paste = crate::system::pasted(pasteboard);
-            surface.event(id, EventKind::Paste, EventPayload::Paste(Box::new(paste)));
-        }
         let behavior = input.config.borrow().paste_behavior;
-        behavior.inserts(crate::system::has_pasted_files(pasteboard))
+        let files = if listens {
+            let paste = crate::system::pasted(pasteboard);
+            let files = !paste.files.is_empty() || !paste.uris.is_empty();
+            surface.event(id, EventKind::Paste, EventPayload::Paste(Box::new(paste)));
+            files
+        } else {
+            behavior == nsh_core::PasteBehavior::ReportFiles
+                && crate::system::has_local_pasted_files(pasteboard)
+        };
+        behavior.inserts(files)
     }
 
     /// Whether the editor offers Paste for what a text view's own paste

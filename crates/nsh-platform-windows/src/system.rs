@@ -2217,8 +2217,14 @@ fn bmp_file(dib: &[u8]) -> Option<Vec<u8>> {
     Some(file)
 }
 
-/// The `file:` URLs of the files on the clipboard (`CF_HDROP`: files
-/// copied in Explorer).
+/// Whether the clipboard offers files copied in Explorer (`CF_HDROP`).
+pub(crate) fn clipboard_has_files() -> bool {
+    use windows::Win32::System::{DataExchange::IsClipboardFormatAvailable, Ole::CF_HDROP};
+    // SAFETY: a clipboard format query does not open or read its data.
+    unsafe { IsClipboardFormatAvailable(u32::from(CF_HDROP.0)).is_ok() }
+}
+
+/// The local files on the clipboard as `file:` URLs.
 pub(crate) fn clipboard_files() -> Vec<String> {
     use std::{ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf};
 

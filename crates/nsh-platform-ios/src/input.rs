@@ -479,14 +479,11 @@ fn pasting(view: &UIView, ivars: &InputIvars) -> bool {
 /// [`pasting`] from `board`.
 fn pasting_from(view: &UIView, ivars: &InputIvars, board: &objc2_ui_kit::UIPasteboard) -> bool {
     let (listens, behavior) = (ivars.paste_listens.get(), ivars.paste_behavior.get());
-    // Whether it holds images or files, where the behavior asks.
-    let mut files = false;
-    if listens || behavior == nsh_core::PasteBehavior::ReportFiles {
+    let files =
+        behavior == nsh_core::PasteBehavior::ReportFiles && crate::system::has_pasted_files(board);
+    if listens {
         let paste = crate::system::pasted(board);
-        files = !paste.files.is_empty() || !paste.uris.is_empty();
-        if listens {
-            report_paste(view, paste);
-        }
+        report_paste(view, paste);
     }
     // SAFETY: a plain getter (no paste notice).
     behavior.inserts(files) && unsafe { board.hasStrings() }

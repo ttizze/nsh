@@ -2298,16 +2298,27 @@ fn paste(surface: &Surface, view: &NshView) {
             return;
         };
         let text = item.as_ref().and_then(|item| item.text());
-        let paste = pasted_content(text.clone(), item);
-        let files = !paste.files.is_empty() || !paste.uris.is_empty();
+        let behavior = input.config.borrow().paste_behavior;
+        let files = behavior == nsh_core::PasteBehavior::ReportFiles
+            && item
+                .iter()
+                .flat_map(|item| item.entries())
+                .any(|entry| match entry {
+                    gpui::ClipboardEntry::Image(_) => true,
+                    gpui::ClipboardEntry::ExternalPaths(paths) => {
+                        paths.paths().iter().any(|path| path.is_absolute())
+                    }
+                    _ => false,
+                });
         if view.state().events.contains(EventKind::Paste) {
+            let paste = pasted_content(text.clone(), item);
             surface.event(
                 view.id(),
                 EventKind::Paste,
                 EventPayload::Paste(Box::new(paste)),
             );
         }
-        if !input.config.borrow().paste_behavior.inserts(files) {
+        if !behavior.inserts(files) {
             return;
         }
         let Some(text) = text else {

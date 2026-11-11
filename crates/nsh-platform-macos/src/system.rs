@@ -1102,8 +1102,7 @@ fn attributed_html(text: &NSAttributedString) -> Option<String> {
 }
 
 /// Whether `pasteboard` holds what a text view's own paste leaves out:
-/// images or local files (reading the types is no paste: no privacy
-/// notice).
+/// image or file URL types. Menu validation reads no clipboard contents.
 pub(crate) fn has_pasted_files(pasteboard: &NSPasteboard) -> bool {
     pasteboard.types().is_some_and(|types| {
         IMAGE_TYPES
@@ -1111,6 +1110,23 @@ pub(crate) fn has_pasted_files(pasteboard: &NSPasteboard) -> bool {
             .map(|(_, kind)| *kind)
             .chain(["public.file-url"])
             .any(|kind| types.containsObject(&NSString::from_str(kind)))
+    })
+}
+
+/// A user's paste: whether image types or local file URLs will be reported.
+/// Read file URLs only here, and leave image decoding to `pasted`.
+pub(crate) fn has_local_pasted_files(pasteboard: &NSPasteboard) -> bool {
+    pasteboard.pasteboardItems().is_some_and(|items| {
+        let kind = NSString::from_str("public.file-url");
+        items.iter().any(|item| {
+            if let Some(uri) = item.stringForType(&kind) {
+                return crate::file_drop::local_file_uri(&uri).is_some();
+            }
+            let types = item.types();
+            IMAGE_TYPES
+                .iter()
+                .any(|(_, kind)| types.containsObject(&NSString::from_str(kind)))
+        })
     })
 }
 

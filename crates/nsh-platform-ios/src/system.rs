@@ -448,6 +448,18 @@ pub(crate) fn pasted(board: &objc2_ui_kit::UIPasteboard) -> nsh_core::PasteEvent
     }
 }
 
+/// Tests for image types or local file URLs without decoding image data.
+pub(crate) fn has_pasted_files(board: &objc2_ui_kit::UIPasteboard) -> bool {
+    // SAFETY: pasteboard getters on the main thread, during a user's paste.
+    unsafe {
+        board.hasImages()
+            || (board.hasURLs()
+                && board
+                    .URLs()
+                    .is_some_and(|urls| urls.iter().any(|url| url.isFileURL())))
+    }
+}
+
 /// The pasteboard's formatted content as HTML: `public.html` as browsers,
 /// office suites and most editors copy it; else the main resource of a web
 /// archive (Safari, Mail); else RTF (Notes, Pages, TextEdit on Mac

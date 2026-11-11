@@ -26,8 +26,9 @@ final class InputContent {
         int source = payload.getSource();
         if (source != ContentInfo.SOURCE_CLIPBOARD && source != ContentInfo.SOURCE_INPUT_METHOD) return payload;
         // Without a listener a paste that inserts is the EditText's own.
-        if (!box.pasted(payload.getClip()) && box.inserts(payload.getClip())) return payload;
-        if (!box.inserts(payload.getClip())) return null;
+        boolean inserts = box.inserts(payload.getClip());
+        if (!box.pasted(payload.getClip()) && inserts) return payload;
+        if (!inserts) return null;
         // The text goes on to the EditText; what else there was is consumed.
         ClipData clip = payload.getClip();
         ClipData text = null;
