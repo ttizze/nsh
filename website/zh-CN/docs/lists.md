@@ -162,7 +162,7 @@ const toggle = (id: number) =>
 | `viewport` | `.viewport(ListViewport::..)` | `"own" \| "parent"` | `"own"` | `"own"`：列表在自己的滚动视图中滚动。`"parent"`：列表以完整长度排在外层滚动视图中，随页面其他内容一起滚动（见[页面中的列表](#页面中的列表viewportparent)）。在列表创建时确定。 |
 | `numColumns` | `.columns(n)` | `number` | `1` | 每行的条目数（纵向列表）。 |
 | `inverted` | `.inverted()` | `boolean` | `false` | 第 0 项在底部（聊天）；初始滚动到末尾，并保持与末尾的距离。 |
-| `maintainVisibleContentPosition` | `.follow_end(px(..))` | `{ autoscrollToBottomThreshold?: number }` | | 非倒置列表在距离末尾不超过该点数时，随内容增长停留在末尾（见下文）。 |
+| `maintainVisibleContentPosition` | `.follow_end(px(..))` | `{ autoscrollToBottomThreshold?: number }` | | 非倒置列表在距离末尾不超过该点数时，随内容或视口尺寸变化停留在末尾（见下文）。 |
 | `alignment` | `.alignment(ListAlignment::..)` | `"top" \| "bottom"` | `"top"` | 列表停靠的位置。`"bottom"`：打开时位于末尾，内容增长时保持在末尾，行按阅读顺序排列（见下文）。 |
 | `stickyHeaderIndices` | `.sticky_header_indices(..)` | `number[]` | | 滚过时吸附在顶部的条目（单列且非倒置）。 |
 | `stickyHeaderOffset` | `.sticky_header_offset(px(..))`、`.bind_sticky_header_offset(&node)` | `number \| AnimatedNode` | `0` | 吸顶条目吸附在距顶部多远的位置，同 CSS `position: sticky` 的 `top`；内容继续在其上方的空间下滚动。动画值让它们逐帧移动。 |
@@ -489,7 +489,7 @@ virtual_list(move || messages.with(Vec::len), move |at| bubble(messages, at))
 
 ### 让非倒置列表跟随末尾
 
-按阅读顺序排列（最早的在前）的列表也可以跟随末尾：在 Rust 中用 `.follow_end(px(40.0))`，在 TSX 中用 `maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}`，当用户停在末尾（或距离末尾不超过 40 点）时，列表会随内容增长停留在末尾：流式写入最后一项的回复、追加的新消息、键盘让列表变矮。用户往上滚得更远时，可见内容保持不动，新内容在其下方增长。在可见条目之上插入的条目从不会移动它们，无论是否设置该选项。
+按阅读顺序排列（最早的在前）的列表也可以跟随末尾：在 Rust 中用 `.follow_end(px(40.0))`，在 TSX 中用 `maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}`，当用户停在末尾（或距离末尾不超过 40 点）时，列表会随内容或视口尺寸变化停留在末尾：流式写入最后一项的回复、追加的新消息、折叠的行，或键盘改变列表高度。用户往上滚得更远时，可见内容保持不动，新内容在其下方增长。在可见条目之上插入的条目从不会移动它们，无论是否设置该选项。
 
 ```rust tabs
 virtual_list(move || messages.with(Vec::len), move |at| bubble(messages, at))

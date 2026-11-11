@@ -98,6 +98,9 @@ expect Feed 0
 scroll scroll:text:"Feed 0" 0 200
 tap id:add
 prop scroll:text:"Feed 9" contentOffset y=240
+# A collapsing last row keeps its end, now at 220.
+tap id:collapse-last
+prop scroll:text:"Feed 10" contentOffset y=220
 # Scrolled away, measuring a taller row above the viewport preserves the
 # reader's position; anchoring must not make it start following again.
 scroll id:follow-feed 0 140

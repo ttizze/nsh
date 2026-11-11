@@ -10,12 +10,16 @@ const range = (n: number) => Array.from({ length: n }, (_, i) => i);
 
 function App() {
   const items = signal(range(10));
+  const collapsed = signal(false);
   const viewable = signal("none");
   const firstHeight = signal(40);
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
       <View testID="add" onPress={() => items.set(range(items().length + 1))}>
         <Text>Add</Text>
+      </View>
+      <View testID="collapse-last" onPress={() => collapsed.set(true)}>
+        <Text>Collapse last row</Text>
       </View>
       <View testID="grow-first" onPress={() => firstHeight.set(340)}>
         <Text>Grow first</Text>
@@ -28,7 +32,7 @@ function App() {
         style={{ height: 200 }}
       >
         {(item) => (
-          <View style={{ height: item() === 0 ? firstHeight() : 40 }}>
+          <View style={{ height: item() === 0 ? firstHeight() : collapsed() && item() === items().length - 1 ? 20 : 40 }}>
             <Text>Feed {item()}</Text>
           </View>
         )}
