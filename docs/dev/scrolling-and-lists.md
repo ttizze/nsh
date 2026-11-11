@@ -40,7 +40,7 @@
   Android's minimum span (about 27 mm between the fingers). Zoom reports go to the core (`EngineControl::zoom`).
 - **List** props: `each`, `estimatedItemSize`, `numColumns`, `inverted` (chat: item 0 at the bottom, starts at the end and keeps its
   distance from the end as content changes; with `onLoadMoreAtStart`, only while at it, the visible rows when scrolled away), `maintainVisibleContentPosition` (`autoscrollToBottomThreshold`: a list
-  that is not inverted follows its end while within that distance of it, `ListState::anchor_end`; scrolled up, growth
+  that is not inverted follows its end as content and viewport sizes change while within that distance of it, `ListState::anchor_end`; scrolled up, growth
   below the viewport moves nothing; Rust components: `ListLayout::follow_end`, on their own lists and the lists they place), `stickyHeaderIndices` (one column, not inverted) + `stickyHeaderOffset` (where they stick: the core subtracts a number from the sticky ranges, so platforms pin as they do without one; an animated node rides along in `StickyCell::offset`, `ListState::sticky_node`, and the platforms add its value as they pin), `header` /
   `footer` / `empty` / `separator` (a component or an element), `contentStyle`
   (padding and gaps, numbers) / `contentClass` (`p-*`, `gap-*`), `initialScrollIndex`, `onLoadMore` + `loadMoreThreshold`,

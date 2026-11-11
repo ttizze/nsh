@@ -1166,9 +1166,9 @@ impl ListState {
     /// Inverted lists keep their distance from the end of the content:
     /// returns how far to scroll after content or viewport changes (and
     /// starts at the end). Other lists with `follow_end` stay at the end
-    /// when the end moves away while they are within the threshold of it
-    /// (a growing last item, a shrinking viewport); scrolled further up,
-    /// they keep what is visible (content grows below it).
+    /// while content and viewport sizes change and they are within the
+    /// threshold of it; scrolled further up, they keep what is visible
+    /// (content grows below it).
     /// `anchored` already moved the offset to preserve visible rows: test
     /// the distance from the old end before that movement.
     pub(super) fn anchor_end(&mut self, anchored: f32) -> f32 {
@@ -1181,7 +1181,14 @@ impl ListState {
                 return 0.0;
             };
             let was = std::mem::replace(&mut self.anchored_end, end);
-            if was.is_nan() || end <= was || was - (self.offset - anchored) > threshold {
+            let distance = was - (self.offset - anchored);
+            // Measurements can leave the end unchanged or contracted while
+            // moving the visible rows. Pure user scrolls and native overscroll
+            // at either edge keep their positions.
+            let settle = distance >= 0.0
+                && self.offset - anchored >= 0.0
+                && (end != was || anchored != 0.0);
+            if was.is_nan() || distance > threshold || (end <= was && !settle) {
                 return 0.0;
             }
             let delta = end - self.offset;
@@ -1890,6 +1897,72 @@ mod tests {
         m.offset = 5000.0 - 400.0;
         m.measured(99, 80.0);
         assert_eq!(m.anchor_end(0.0), 0.0);
+    }
+
+    #[test]
+    fn following_the_end_survives_rows_shrinking_above_a_growing_last_row() {
+        for (height, end) in [(70.0, 1490.0), (80.0, 1500.0)] {
+            for gap in [0.0, 5.0, 11.0] {
+                let mut l = list(40, 50.0, 500.0);
+                l.set_follow_end(Some(10.0));
+                l.anchor_end(0.0);
+                l.reported(1500.0 - gap, 0);
+                let kept = l.measured(0, 20.0);
+                assert_eq!(kept, -30.0);
+                assert_eq!(l.measured(39, height), 0.0);
+                l.offset += kept;
+                let correction = l.anchor_end(kept);
+                if gap <= 10.0 {
+                    assert_eq!(l.offset, end);
+                    assert_eq!(kept + correction, end - 1500.0 + gap);
+                } else {
+                    assert_eq!(correction, 0.0);
+                    assert_eq!(l.offset, 1459.0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_followed_end_contracts_with_visible_content_or_a_larger_viewport() {
+        for (height, viewport) in [(30.0, 500.0), (50.0, 520.0)] {
+            let mut l = list(40, 50.0, 500.0);
+            l.set_follow_end(Some(10.0));
+            l.anchor_end(0.0);
+            l.reported(1500.0, 0);
+            assert_eq!(l.measured(39, height), 0.0);
+            l.viewport = viewport;
+            assert_eq!(l.anchor_end(0.0), -20.0);
+            assert_eq!(l.offset, 1480.0);
+        }
+    }
+
+    #[test]
+    fn contracting_content_preserves_native_overscroll_at_either_edge() {
+        for (count, size, offset, last) in [(40, 50.0, 1510.0, 40.0), (10, 53.0, -20.0, 43.0)] {
+            let mut l = list(count, size, 500.0);
+            l.set_follow_end(Some(80.0));
+            l.anchor_end(0.0);
+            l.reported(offset, 0);
+            assert_eq!(l.measured(count - 1, last), 0.0);
+            assert_eq!(l.anchor_end(0.0), 0.0);
+            assert_eq!(l.offset, offset);
+        }
+    }
+
+    #[test]
+    fn scrolling_up_within_the_follow_threshold_keeps_the_readers_position() {
+        let mut l = list(40, 50.0, 500.0);
+        l.set_follow_end(Some(80.0));
+        for i in 0..40 {
+            l.measured(i, 50.0);
+        }
+        l.anchor_end(0.0);
+        l.reported(1500.0, 0);
+        l.anchor_end(0.0);
+        l.reported(1495.0, 0);
+        assert_eq!(l.anchor_end(0.0), 0.0);
+        assert_eq!(l.offset, 1495.0);
     }
 
     #[test]

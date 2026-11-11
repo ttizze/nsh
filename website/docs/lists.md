@@ -162,7 +162,7 @@ A list takes every scrolling prop of the scroll view that makes sense for a list
 | `viewport` | `.viewport(ListViewport::..)` | `"own" \| "parent"` | `"own"` | `"own"`: the list scrolls in a scroll view of its own. `"parent"`: it lies at its full length in the scroll view around it, which scrolls it with the rest of the page (see [lists in a page](#lists-in-a-page-viewportparent)). Chosen when the list is made. |
 | `numColumns` | `.columns(n)` | `number` | `1` | Items per row (vertical lists). |
 | `inverted` | `.inverted()` | `boolean` | `false` | Item 0 at the bottom (chat); starts at the end and keeps its distance from the end. |
-| `maintainVisibleContentPosition` | `.follow_end(px(..))` | `{ autoscrollToBottomThreshold?: number }` | | A list that is not inverted stays at the end while it is within that many points of it, as content grows (see below). |
+| `maintainVisibleContentPosition` | `.follow_end(px(..))` | `{ autoscrollToBottomThreshold?: number }` | | A list that is not inverted stays at the end while it is within that many points of it, as content and viewport sizes change (see below). |
 | `stickyHeaderIndices` | `.sticky_header_indices(..)` | `number[]` | | Items that stick to the top while scrolled past (one column, not inverted). |
 | `stickyHeaderOffset` | `.sticky_header_offset(px(..))`, `.bind_sticky_header_offset(&node)` | `number \| AnimatedNode` | `0` | How far below the top the sticky items stick, as CSS `position: sticky`'s `top`; the content scrolls on under the space above them. An animated value moves them every frame. |
 | `contentStyle` | `.content_padding(..)`, `.content_padding_x(..)`, ..., `.row_gap(..)`, `.column_gap(..)` | `{ padding*, gap, rowGap, columnGap }` | | Padding and gaps of the content, numbers only. |
@@ -468,7 +468,7 @@ mount(Chat);
 
 ### Following the end of a list that is not inverted
 
-A list in reading order (oldest first) can follow its end too: with `.follow_end(px(40.0))` in Rust or `maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}` in TSX, while the user is at the end (or within 40 points of it), the list stays at the end as the content grows: a reply streaming into the last item, a new message appended, the keyboard shrinking the list. Scrolled further up, the visible content stays where it is and the new content grows below it. Items inserted above the visible ones never move them, with or without the option.
+A list in reading order (oldest first) can follow its end too: with `.follow_end(px(40.0))` in Rust or `maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}` in TSX, while the user is at the end (or within 40 points of it), the list stays at the end as content and viewport sizes change: a reply streaming into the last item, a new message appended, a row collapsing, or the keyboard resizing the list. Scrolled further up, the visible content stays where it is and the new content grows below it. Items inserted above the visible ones never move them, with or without the option.
 
 ```rust tabs
 virtual_list(move || messages.with(Vec::len), move |at| bubble(messages, at))

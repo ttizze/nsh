@@ -10674,9 +10674,26 @@ mod components {
         assert!(c.commit().is_none(), "every row is bound already");
         assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
         assert_eq!(scrolled(&c.commit().unwrap()), 80.0);
-        // Scrolled up, what is visible stays as the last row shrinks and
-        // grows again.
-        c.set_scroll_offset(list, point(px(0.0), px(100.0)), 1);
+        // At the end, a collapsing last row keeps the end too. The scroll
+        // precedes the smaller content size, so the platform only clamps once.
+        c.set_scroll_offset(list, point(px(0.0), px(420.0)), 1);
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert_eq!(scrolled(&batch), -80.0);
+        let scroll = batch
+            .items
+            .iter()
+            .position(|item| matches!(item, MountItem::ScrollBy { id, .. } if *id == list))
+            .unwrap();
+        let content = batch
+            .items
+            .iter()
+            .position(|item| matches!(item, MountItem::ScrollContent { id, .. } if *id == list))
+            .unwrap();
+        assert!(scroll < content);
+        // Scrolled up, what is visible stays as the last row grows and
+        // shrinks again.
+        c.set_scroll_offset(list, point(px(0.0), px(100.0)), 2);
         assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
         assert_eq!(scrolled(&c.commit().unwrap()), 0.0);
         assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
