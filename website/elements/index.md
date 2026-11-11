@@ -110,6 +110,7 @@ and take their look from the app.
 | `<Checkbox>` | `nsh_base::checkbox()` | A checked, unchecked or indeterminate control with an indicator | [Checkbox](./checkbox.md) |
 | `<Collapsible>` | `nsh_base::collapsible()` | A region whose content expands and collapses | [Collapsible](./collapsible.md) |
 | `<Command>` | `nsh_base::command()` | A command palette: a search field over commands filtered natively, a virtualized list, the keys of a Cmd+K palette | [Command](./command.md) |
+| `<EmojiPicker>` | `nsh_base::emoji_picker()` | An emoji picker: a search field over every emoji in groups, the app's recent ones and names, skin tones, a virtualized grid | [EmojiPicker](./emoji-picker.md) |
 | `<DataTable>` | `nsh_base::data_table()` | A table of rows and columns of any number, selectable, sortable, with resizable and movable columns | [DataTable](./data-table.md) |
 | `<Dialog>` | `nsh_base::dialog()` | Presents its children over everything else | [Dialog](./dialog.md) |
 | `<DiffView>` | `nsh_base::diff_view()` | The changes between two texts or of a patch, split or unified | [DiffView](./diff-view.md) |
@@ -199,6 +200,7 @@ an `<Input>`, an `ImageStyle` on an `<Image>`, a `ViewStyle` elsewhere.
 | `activeStyle` | `.active(\|s\| ..)` | `active:` | While pressed. |
 | `hoverStyle` | `.hover(\|s\| ..)` | `hover:` | While a pointer is over the view. |
 | `focusStyle` | `.focus(\|s\| ..)` | `focus:` | While the view has focus. |
+| `focusVisibleStyle` | `.focus_visible(\|s\| ..)` | `focus-visible:` | While the view has focus and shows it: the keyboard moved it there, or the app moved it after a key; a text input whenever it has focus. A press or a tap focuses without it. |
 | `focusWithinStyle` | `.focus_within(\|s\| ..)` | `focus-within:` | While the view or a view inside it has focus (the content of an `Overlay` counts as inside the view it is in). |
 | `disabledStyle` | `.disabled_style(\|s\| ..)` | `disabled:` | While `disabled`. |
 | `checkedStyle` | `.checked(\|s\| ..)`, `.checked_style(style)` | `checked:` | While `accessibilityState.checked` is `true` (a checkbox, a switch, a radio; `"mixed"` is not checked). |
@@ -281,11 +283,65 @@ const at = signal<number | null>(null);
 </View>
 ```
 
+### Wheel
+
+`onWheel` hears a mouse wheel or touchpad scroll over a view, on macOS, Windows, Linux, the GPUI backend and the web
+(the DOM's `wheel`, GPUI's `ScrollWheelEvent`). The nearest view around the one under the pointer that listens hears
+it. When that view is nearer than every scroll view under the pointer, it takes the wheel: nothing scrolls, zooms or
+pinches natively, so a canvas inside a page can zoom on Control + wheel and pan otherwise. A scroll view that listens,
+or a view around one, only observes: the scroll view still scrolls. JS never cancels a native scroll after the fact
+(the main thread does not wait for it), so whether a view takes the wheel is decided by what is mounted, as with
+`onContextMenu`.
+
+| Prop | Rust | Type | Description |
+|---|---|---|---|
+| `onWheel` | `.on_wheel(..)` | `(e: WheelEvent) => void` | A mouse wheel or touchpad scrolled over the view or a view inside it. |
+
+`WheelEvent` has `position` and `pagePosition`, as `MouseEvent`, the `modifiers` held, `delta` (a `Point`: positive
+`y` scrolls down, toward the end, positive `x` right, as the DOM's `deltaX` / `deltaY`) and `deltaMode`: `"lines"` for
+mouse wheel notches, `"points"` for a precise device (a touchpad, a Magic Mouse; AppKit's `hasPreciseScrollingDeltas`,
+the DOM's `DOM_DELTA_PIXEL`). In Rust `delta` is a `WheelDelta`, `Lines(Point<f32>)` or `Points(Point<Points>)`, as
+GPUI's `ScrollDelta`; `delta.points(line_height)` gives points either way.
+
+```rust tabs
+// A canvas: Control + wheel zooms, the wheel pans.
+let zoom = signal(1.0_f32);
+let offset = signal(Point::<Points>::default());
+
+view()
+    .size_full()
+    .on_wheel(move |e: &WheelEvent| {
+        let d = e.delta.points(px(16.0));
+        if e.modifiers.ctrl {
+            zoom.update(|z| *z *= (1.0 - d.y.0 / 200.0).clamp(0.5, 2.0));
+        } else {
+            offset.update(|o| *o = point(o.x - d.x, o.y - d.y));
+        }
+    })
+```
+
+```tsx tabs
+// A canvas: Control + wheel zooms, the wheel pans.
+const zoom = signal(1);
+const offset = signal({ x: 0, y: 0 });
+
+<View
+  style={{ flex: 1 }}
+  onWheel={(e) => {
+    const unit = e.deltaMode === "lines" ? 16 : 1;
+    if (e.modifiers.control) zoom.update((z) => z * Math.min(2, Math.max(0.5, 1 - (e.delta.y * unit) / 200)));
+    else offset.update((o) => ({ x: o.x - e.delta.x * unit, y: o.y - e.delta.y * unit }));
+  }}
+/>
+```
+
 ### Tooltips
 
 `tooltip` gives any element a hint, shown above it on the desktops (macOS, Windows, Linux, the GPUI backend and
 desktop browsers) once the pointer has rested on it for half a second, until the pointer leaves or presses it, and on
-every device while the keyboard focus is on it, until the focus leaves or Escape is pressed. The hint never takes the pointer or presses, so the element works exactly as it does without it.
+every device once the keyboard moves the focus to it, until the focus leaves or Escape is pressed (a click or a tap
+that focuses it leaves the hint to the pointer). The hint never takes the pointer or presses, so the element works
+exactly as it does without it.
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|
@@ -365,6 +421,10 @@ presses, and every `focusable` view. Focus styles (`focus:`, `.focus(..)`) style
 presses it when it takes presses. A click presses a view without focusing it, so focus styles show for keyboard focus
 only.
 
+The view the focus reaches scrolls into view in the scroll views and lists around it. Tab walks every row of a list,
+the rows not rendered yet included: the list renders the next row as the focus reaches it, and the focus leaves the
+list after its last row.
+
 Focus and presses are separate. A view that takes keys while it has the focus (a chart, a slider, a list that moves
 its selection with the arrow keys) sets `focusable` and binds its keys while focused (`onFocus` / `onBlur` with
 [`keymap`](../modules/nsh.md#keymap)); a press on it still reaches a pressable around it, such as a card that
@@ -436,6 +496,44 @@ view().on_press(open_page).child(
 | `testID` | `.test_id(id)` | `string` | An identifier for UI tests (on Android, the view's resource id). |
 | `key` | `.key(key)` | `string` | The element's identity among its siblings. |
 
+### The page's markup
+
+On the web each view is an HTML element, the one its props say it is, so search engines and screen readers see the
+page's headings, paragraphs, links and landmarks; its layout, styles and events stay the view's. The other platforms
+draw the view as they always do.
+
+| What the view is | Element on the web |
+|---|---|
+| `role="header"` with `accessibilityLevel` 1 to 6 (Rust `.role(AccessibilityRole::Header)`, `.accessibility_level(n)`) | `h1` … `h6` (`h2` without a level) |
+| A [`Link`](./link.md) with an `href` | `a`, to the `href` |
+| `web={{ element }}` (Rust `.web_element(WebElement::P)`) | The element it names: `"p"`, `"nav"`, `"header"`, `"footer"`, `"main"`, `"article"`, `"section"`, `"aside"`, `"ul"`, `"ol"`, `"li"`, `"strong"`, `"em"`, `"blockquote"`, `"figure"`, `"figcaption"`, `"time"`, `"address"`; it wins over the role |
+| Anything else | `div` |
+
+A link is the `Link`'s to press: a plain click is its `onOpen` (with `openWith="app"`, the app navigates as it always
+does); crawlers follow the `href`, and a click with a modifier key or the middle button opens it as a browser link
+does.
+
+```rust tabs
+use nsh_base::{LinkOpenWith, link};
+use nsh_core::{WebElement, prelude::*};
+
+link()
+    .href("/notes/q3-earnings")
+    .open_with(LinkOpenWith::App)
+    .on_open(move |_: &SharedString| routes.update(|r| r.push(Route::Note("q3-earnings".into()))))
+    .child(text("Q3 earnings").role(AccessibilityRole::Header).accessibility_level(2))
+    .child(text("Revenue grew 12%.").web_element(WebElement::P))
+```
+
+```tsx tabs
+<Link href="/notes/q3-earnings" openWith="app" onOpen={() => nav.push({ name: "note", slug: "q3-earnings" })}>
+  <Text role="header" accessibilityLevel={2}>Q3 earnings</Text>
+  <Text web={{ element: "p" }}>Revenue grew 12%.</Text>
+</Link>
+```
+
+[The web](../docs/web.md#search-engines) shows a whole site built this way.
+
 ### Gestures driving animated values
 
 These props bind a gesture to [native animated values](../modules/nsh.md#animation) that move on the UI thread, with no
@@ -480,6 +578,7 @@ activates its pan, so drags inside scroll views leave the other axis to them
 | `accessible` | `.accessible(..)` | `boolean` | The view is one element for assistive technologies; its children are not exposed separately. |
 | `accessibilityLabel` | `.label(..)` | `string` | What screen readers read. Views without a label read their texts. |
 | `accessibilityHint` | `.hint(..)` | `string` | What activating the element does. |
+| `accessibilityDescription` | `.accessibility_description(..)` | `string` | More about the element than its name, read after it (a dialog's message). |
 | `role` | `.role(AccessibilityRole::Button)` | `AccessibilityRole` | What the element is (`"button"`, `"header"`, `"link"`, `"switch"`, …). |
 | `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded?, pressed?, current? }` | The state assistive technologies report (`checked` and `pressed` may be `"mixed"`; `current` is `true` or `"page"`, `"step"`, `"location"`, `"date"`, `"time"`). |
 | `accessibilityLevel` | `.accessibility_level(..)` | `number` | The level of a heading (1 the top), the depth of a tree item (1 at the top). |
@@ -552,12 +651,15 @@ of its own.
 |---|---|---|---|
 | `focus()` / `blur()` | `focus()` / `blur()` | `ViewRef` | Focuses an `<Input>` (shows the keyboard), or gives a view that takes presses the keyboard focus / unfocuses. |
 | `measure()` | `measure()` | `ViewRef` | [Where the view is](../docs/touch-and-gestures.md#where-a-view-is-measure). |
+| `reveal({ vertical?, horizontal?, animated? })` | `reveal(options)` | `ViewRef` | [Scrolls the scroll views around the view](../docs/scrolling.md#revealing-a-view) so it shows. |
 | `setSelection(start, end?)` | `set_selection(start, end)` | `InputRef` | Selects `start..end` in UTF-16 units; a caret without `end`. |
+| `insertText(text)` | `insert_text(text)` | `InputRef` | Inserts `text` in place of the selection as the user's edit, one step of the undo history (Linux, the web, headless tests). |
 | `scrollTo({ x?, y?, animated? })` | `scroll_to(point, animated)` | `ScrollRef`, `ListRef` | Scrolls to an offset. |
 | `zoomTo({ scale, x?, y?, animated? })` | `zoom_to(scale, center, animated)` | `ScrollRef` (a zoomable `<Scroll>`) | Zooms to `scale` around a content point. |
 | `scrollToOffset({ offset, animated? })` | `scroll_to_offset(offset, animated)` | `ListRef` | Scrolls to an offset along the list's axis. |
 | `scrollToIndex({ index, animated?, viewPosition?, viewOffset? })` | `scroll_to_index(index, position, offset, animated)` | `ListRef` | Scrolls an item into view. |
 | `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | `ScrollRef`, `ListRef` | Scrolls to the end of the content. |
+| `measureScrollPosition()` | `measure_scroll_position()` | `ListRef` | [Where the viewport starts among the rows](../docs/lists.md#keeping-a-reading-position). |
 | `reload()`, `goBack()`, `goForward()`, `stopLoading()`, `injectJavaScript(script)`, `postMessage(data)` | `reload()`, `go_back()`, `go_forward()`, `stop_loading()`, `inject_java_script(..)`, `post_message(..)` | `WebViewRef` | Controls the page. |
 | `seek(seconds)` | `seek(seconds)` | `VideoRef` | Jumps to a time. |
 | `command(name, args?)` | `command(name, args)` | `NativeComponentRef` | Calls a command of a registered native component ([`nativeComponent`](../modules/nsh.md#nativecomponent-and-nativemodule)). |

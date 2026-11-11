@@ -45,6 +45,7 @@ fn first_frame_of(app: &str, tag: &str, os: Os, idiom: Idiom) -> Vec<MountItem> 
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
@@ -52,6 +53,7 @@ fn first_frame_of(app: &str, tag: &str, os: Os, idiom: Idiom) -> Vec<MountItem> 
         app: nsh_engine::App::Js(Bundle::source(bundle.code)),
         viewport: Size::new(px(320.0), px(480.0)),
         trace: false,
+        content_culling: false,
         network: None,
         websocket: None,
         refuse_connections: None,
@@ -209,6 +211,7 @@ fn js_reads_the_window_and_the_displays_and_restores_bounds() {
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     let rect = |x: f32, w: f32, h: f32| Bounds::new(point(px(x), px(0.0)), size(px(w), px(h)));
@@ -320,6 +323,7 @@ fn js_turns_the_performance_monitor_on_and_follows_it() {
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
@@ -384,6 +388,7 @@ mount(() => <View>{Array.from({ length: 50 }, (_, i) => <Text>{`row ${i}`}</Text
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
@@ -467,6 +472,7 @@ fn js_windows_open_with_their_kinds_defaults_and_report_back() {
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
@@ -602,6 +608,7 @@ fn js_popovers_in_a_window_are_placed_in_it() {
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
@@ -698,6 +705,7 @@ fn js_dialogs_mounted_in_an_open_window_name_it_before_they_show() {
         minify: false,
         split: false,
         ui_sets: vec![nsh_base::registry().into()],
+        ..Default::default()
     })
     .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();

@@ -9,19 +9,18 @@ use std::{
 };
 
 use nsh_core::{
+    desktop::MenuLabels,
     geometry::{Size, px},
     platform::{Appearance, Locale},
 };
 use nsh_engine::{App, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root};
 use objc2::{
-    MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained,
-    runtime::ProtocolObject, sel,
+    MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained, runtime::ProtocolObject,
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
     NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSEvent, NSEventModifierFlags,
-    NSEventType, NSMenu, NSMenuItem, NSScreen, NSView, NSWindow, NSWindowDelegate,
-    NSWindowStyleMask,
+    NSEventType, NSScreen, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{
     NSArray, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL,
@@ -154,9 +153,17 @@ pub struct AppOptions {
     /// macos` sets it (the development host's `--background`) unless told
     /// `--foreground`: the test agent's input goes to the window directly.
     pub background: bool,
+    /// How [`run_app`]'s app takes part in the system's UI: a Dock icon and
+    /// the menu bar ([`Regular`](ActivationPolicy::Regular), the default)
+    /// or neither ([`Accessory`](ActivationPolicy::Accessory), a menu bar
+    /// app: `nsh.json` `macos.activationPolicy`). Set before the app's code
+    /// runs, so the Dock never shows an accessory app.
+    /// [`background`](Self::background) takes precedence.
+    pub activation_policy: ActivationPolicy,
     /// Hides the standalone window on close while retaining its engine.
-    /// Reopening from the Dock shows the same window. Quit still stops the app.
-    /// Only used by [`run_app`]; defaults to false.
+    /// Reopening from the Dock shows the same window (an accessory app,
+    /// which has no Dock icon, shows it itself: from its tray, say). Quit
+    /// still stops the app. Only used by [`run_app`]; defaults to false.
     pub keep_alive_on_close: bool,
     /// The native components apps can use (`nsh/native`); shared by the
     /// views made with these options. See [`AppView::register_component`].
@@ -213,6 +220,11 @@ pub struct AppOptions {
     /// too, but never changes the host's window: the embedding app makes its
     /// window nonopaque and clear itself where it wants that.
     pub transparent: bool,
+    /// The labels of the menus [`run_app`] makes in the app's language: its
+    /// standard menu bar (the app menu, Edit and Window) and the items with
+    /// a role and no label of their own in the app's menus. English for
+    /// what it does not label.
+    pub menu_labels: MenuLabels,
 }
 
 impl Default for AppOptions {
@@ -227,6 +239,7 @@ impl Default for AppOptions {
             display: None,
             keep_size: false,
             background: false,
+            activation_policy: ActivationPolicy::Regular,
             keep_alive_on_close: false,
             components: Default::default(),
             appearance: Appearance::System,
@@ -238,7 +251,35 @@ impl Default for AppOptions {
             notifications: false,
             host: nsh_engine::HostChannel::default(),
             transparent: false,
+            menu_labels: MenuLabels::default(),
         }
+    }
+}
+
+/// How an app takes part in the system's UI ([`AppOptions::activation_policy`]),
+/// as GPUI's `ActivationPolicy`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ActivationPolicy {
+    /// A Dock icon, the menu bar while the app is active, a place in the
+    /// app switcher.
+    #[default]
+    Regular,
+    /// None of them: a menu bar app (`LSUIElement`), whose windows show as a
+    /// regular app's.
+    Accessory,
+}
+
+/// The policy [`run_app`] gives the app: a background app is Prohibited
+/// (AppKit does not activate it; an Accessory app is not guaranteed to
+/// stay inactive when its window comes up), else the app's own.
+fn activation_policy(options: &AppOptions) -> NSApplicationActivationPolicy {
+    if options.background {
+        return NSApplicationActivationPolicy::Prohibited;
+    }
+    match options.activation_policy {
+        ActivationPolicy::Regular => NSApplicationActivationPolicy::Regular,
+        ActivationPolicy::Accessory => NSApplicationActivationPolicy::Accessory,
     }
 }
 
@@ -295,6 +336,7 @@ impl AppView {
     /// A view with no app yet; it fills its superview.
     pub fn new(mtm: MainThreadMarker, options: AppOptions) -> Rc<AppView> {
         let surface = Surface::new(mtm, initial_environment());
+        surface.chrome.labels.replace(options.menu_labels.clone());
         surface.appearance.set(options.appearance);
         surface.transparent.set(options.transparent);
         let frame = NSRect::new(
@@ -377,6 +419,7 @@ impl AppView {
             app,
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
+            content_culling: true,
             network: Some(crate::net::network()),
             websocket: None,
             refuse_connections: None,
@@ -428,7 +471,7 @@ impl AppView {
     /// Shows (or hides) the performance monitor: a panel at the top right
     /// with the frame rate, what frames cost the main thread, what commits
     /// cost the engine thread (JS, layout), and the process' CPU, GPU and
-    /// memory, also logged once a second (target `nsh::perf`). Measuring
+    /// memory, also logged once a second (target `nsh::fps`). Measuring
     /// starts with it and stops when it hides; it survives reloads.
     pub fn set_fps_monitor(&self, show: bool) {
         let mut hud = self.fps.borrow_mut();
@@ -513,6 +556,9 @@ fn initial_environment() -> Environment {
         notifications: true,
         audio: true,
         web_input: true,
+        web_evaluate: true,
+        // wgpu, in builds with it, until it finds no GPU.
+        shaders: nsh_engine::shader::LINKED,
         ..Environment::default()
     }
 }
@@ -522,12 +568,93 @@ struct Running {
     window: Retained<NSWindow>,
     view: Rc<AppView>,
     keep_alive_on_close: bool,
+    /// It runs in the background ([`AppOptions::background`]).
+    #[cfg(feature = "dev")]
+    background: bool,
+    /// A development host's window, made before its app's options came: it
+    /// shows when the app comes (unless they say it starts hidden) or an
+    /// error does ([`dev_app_came`], [`dev_error_shown`]).
+    #[cfg(feature = "dev")]
+    held: Cell<bool>,
+}
+
+/// Shows the standalone app's window as it launches: key, the app active,
+/// or, in the background, in front without activating the app.
+fn show_launched(window: &NSWindow, surface: &Surface, background: bool) {
+    if background {
+        // Shown without activating the app (it never is: its window is
+        // never key, and the test agent's input goes to it directly).
+        window.orderFrontRegardless();
+        window.makeFirstResponder(Some(surface.root.ns()));
+        // The window that would be key: its state says it has the
+        // keyboard, which the test agent's keys go to.
+        crate::window::became_key(surface, window);
+    } else {
+        window.makeKeyAndOrderFront(None);
+        window.makeFirstResponder(Some(surface.root.ns()));
+        NSApplication::sharedApplication(surface.mtm).activate();
+    }
+}
+
+/// The window of the standalone app whose surface is `surface`, while a
+/// development host holds it unshown: taken (it shows now), with whether
+/// the app runs in the background.
+#[cfg(feature = "dev")]
+fn take_held(surface: &Surface) -> Option<(Retained<NSWindow>, bool)> {
+    RUNNING.with(|running| {
+        let running = running.try_borrow().ok()?;
+        let running = running.as_ref()?;
+        let ours = std::ptr::eq(&**running.view.surface(), surface);
+        (ours && running.held.replace(false)).then(|| (running.window.clone(), running.background))
+    })
+}
+
+/// A development host's app came (`visible`: unless its nsh.json `window`
+/// says the main window starts hidden): the window, held until the app's
+/// options came, shows as the app's package would show it.
+#[cfg(feature = "dev")]
+pub(crate) fn dev_app_came(surface: &Surface, visible: bool) {
+    let Some((window, background)) = take_held(surface) else {
+        return;
+    };
+    if visible {
+        show_launched(&window, surface, background);
+        crate::window::main_shown(surface);
+    } else {
+        log::info!("the main window starts hidden (nsh.json window.defaultVisible: false)");
+    }
+}
+
+/// A development host shows an error: the window shows with it while it is
+/// hidden, held until the app came or hidden by the app (one hidden since
+/// launch whose startup failed: a tray app before its icon came), so the
+/// error is seen.
+#[cfg(feature = "dev")]
+pub(crate) fn dev_error_shown(surface: &Surface) {
+    let hidden = RUNNING.with(|running| {
+        let running = running.try_borrow().ok()?;
+        let running = running.as_ref()?;
+        if !std::ptr::eq(&**running.view.surface(), surface) {
+            return None;
+        }
+        let held = running.held.replace(false);
+        let hidden = !running.window.isVisible() && !running.window.isMiniaturized();
+        (held || hidden).then(|| (running.window.clone(), running.background))
+    });
+    if let Some((window, background)) = hidden {
+        show_launched(&window, surface, background);
+        crate::window::main_shown(surface);
+    }
 }
 
 thread_local! {
     static RUNNING: RefCell<Option<Running>> = const { RefCell::new(None) };
     /// Links that came before the app's engine started.
     static URL_SCHEMES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// What [`run_app`] runs once launching finished: the link that launched
+    /// the app comes before (`application:openURLs:`), and reaches the
+    /// engine before the app's code runs.
+    static PENDING: RefCell<Option<AppSource>> = const { RefCell::new(None) };
     /// The app asked to start again when its run ends
     /// ([`DesktopCommand::Restart`](nsh_core::desktop::DesktopCommand)).
     static RESTART: Cell<bool> = const { Cell::new(false) };
@@ -538,6 +665,11 @@ thread_local! {
 /// the engine starts.
 fn url_scheme(url: String) {
     let mut url = Some(url);
+    // Before launching finished the app has not started: kept for its start.
+    if PENDING.with(|p| p.borrow().is_some()) {
+        URL_SCHEMES.with(|links| links.borrow_mut().extend(url.take()));
+        return;
+    }
     RUNNING.with(|running| {
         if let Some(running) = running.borrow().as_ref() {
             running.view.surface().control(|control| {
@@ -554,8 +686,36 @@ fn url_scheme(url: String) {
             });
         }
     });
-    if let Some(url) = url {
-        URL_SCHEMES.with(|links| links.borrow_mut().push(url));
+    let Some(url) = url else {
+        return;
+    };
+    // The app's view is there but its engine is not yet (a development
+    // session connecting): the link waits for the engine's start.
+    let view = RUNNING.with(|running| running.borrow().as_ref().map(|r| r.view.clone()));
+    match view {
+        Some(view) => view.surface().launch_links.borrow_mut().push(url),
+        None => URL_SCHEMES.with(|links| links.borrow_mut().push(url)),
+    }
+}
+
+/// Starts [`run_app`]'s app, with the links that came before it.
+fn start_pending() {
+    let Some(source) = PENDING.with(|p| p.borrow_mut().take()) else {
+        return;
+    };
+    let view = RUNNING.with(|running| running.borrow().as_ref().map(|r| r.view.clone()));
+    let Some(view) = view else {
+        return;
+    };
+    view.surface()
+        .launch_links
+        .borrow_mut()
+        .extend(URL_SCHEMES.with(|links| std::mem::take(&mut *links.borrow_mut())));
+    match source {
+        AppSource::Rust(root) => view.load(App::Rust(root)),
+        AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
+        #[cfg(feature = "dev")]
+        AppSource::DevServer(url) => crate::dev::start(&view, url),
     }
 }
 
@@ -575,8 +735,9 @@ define_class!(
             crate::notifications::enable();
         }
 
-        // The links of the schemes the app claims (`CFBundleURLTypes`), the
-        // one that launched it included.
+        // The links of the schemes the app claims (`CFBundleURLTypes`) and
+        // the files of the types it opens (`CFBundleDocumentTypes`, as
+        // `file://` URLs), those that launched it included.
         #[unsafe(method(application:openURLs:))]
         fn open_urls(&self, app: &NSApplication, urls: &NSArray<NSURL>) {
             for url in urls.iter() {
@@ -586,18 +747,26 @@ define_class!(
             }
             // A link opened while the app runs brings it forward.
             app.activate();
-            let window = RUNNING.with(|running| {
+            let shown = RUNNING.with(|running| {
                 running
                     .borrow()
                     .as_ref()
-                    .map(|running| running.window.clone())
+                    .map(|running| (running.window.clone(), running.view.clone()))
             });
-            if let Some(window) = window {
+            if let Some((window, view)) = shown {
                 if window.isMiniaturized() {
                     window.deminiaturize(None);
                 }
                 window.makeKeyAndOrderFront(None);
+                // Hidden since launch: it opens in its mode.
+                crate::window::main_shown(view.surface());
             }
+        }
+
+        // The app starts once the links it was launched with came.
+        #[unsafe(method(applicationDidFinishLaunching:))]
+        fn did_finish_launching(&self, _notification: &NSNotification) {
+            start_pending();
         }
 
         #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
@@ -614,17 +783,19 @@ define_class!(
 
         #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
         fn should_handle_reopen(&self, _app: &NSApplication, _visible: bool) -> bool {
-            let window = RUNNING.with(|running| {
+            let running = RUNNING.with(|running| {
                 running
                     .borrow()
                     .as_ref()
-                    .map(|running| running.window.clone())
+                    .map(|running| (running.window.clone(), running.view.surface().clone()))
             });
-            if let Some(window) = window {
+            if let Some((window, surface)) = running {
                 if window.isMiniaturized() {
                     window.deminiaturize(None);
                 }
                 window.makeKeyAndOrderFront(None);
+                // One hidden at launch shows in the mode it opens in.
+                crate::window::main_shown(&surface);
             }
             false
         }
@@ -651,6 +822,22 @@ define_class!(
                 Some(surface) => crate::window::main_should_close(&surface, window),
                 None => true,
             }
+        }
+
+        // Before a zoom: the frame it returns to (`crate::window_state`).
+        #[unsafe(method(windowShouldZoom:toFrame:))]
+        fn should_zoom(&self, window: &NSWindow, _frame: NSRect) -> bool {
+            let surface = RUNNING.with(|running| {
+                running
+                    .borrow()
+                    .as_ref()
+                    .filter(|running| &*running.window == window)
+                    .map(|running| running.view.surface().clone())
+            });
+            if let Some(surface) = surface {
+                crate::window_state::will_zoom(&surface.window, window);
+            }
+            true
         }
 
         #[unsafe(method(windowWillClose:))]
@@ -791,19 +978,12 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     options.notifications = true;
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
-    // A background app is Prohibited: AppKit does not activate it. An
-    // Accessory app is not guaranteed to stay inactive when its window
-    // comes up.
-    app.setActivationPolicy(if options.background {
-        NSApplicationActivationPolicy::Prohibited
-    } else {
-        NSApplicationActivationPolicy::Regular
-    });
+    app.setActivationPolicy(activation_policy(&options));
     name_app(&options.title);
     crate::chrome::set_app_name(&options.title);
     let delegate: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(mtm), init] };
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-    app.setMainMenu(Some(&main_menu(mtm, &options.title)));
+    crate::chrome::show_standard_menu(mtm, &options.menu_labels);
 
     // nsh.json `window`: known before the window is made, so its first
     // frame has it.
@@ -884,25 +1064,26 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     {
         center_on_display(&window, display);
     }
-    if let Some(app) = loaded {
-        view.load(app);
-    }
+    // A development host's window waits for its app, which brings the
+    // window's options (`dev_app_came`).
+    let held = loaded.is_none();
+    // The app starts once launching finished (`start_pending`), after the
+    // links it was launched with.
+    let pending = match loaded {
+        Some(App::Rust(root)) => Some(AppSource::Rust(root)),
+        Some(App::Js(bundle)) => Some(AppSource::Bundle(bundle)),
+        None => None,
+    };
     #[cfg(feature = "dev")]
-    if let Some(url) = dev_server {
-        crate::dev::start(&view, url);
-    }
-    if options.background {
-        // Shown without activating the app (it never is: its window is
-        // never key, and the test agent's input goes to it directly).
-        window.orderFrontRegardless();
-        window.makeFirstResponder(Some(view.surface().root.ns()));
-        // The window that would be key: its state says it has the
-        // keyboard, which the test agent's keys go to.
-        crate::window::became_key(view.surface(), &window);
-    } else {
-        window.makeKeyAndOrderFront(None);
-        window.makeFirstResponder(Some(view.surface().root.ns()));
-        app.activate();
+    let pending = pending.or(dev_server.map(AppSource::DevServer));
+    PENDING.with(|p| *p.borrow_mut() = pending);
+    // nsh.json `window.defaultVisible: false`: the window is made and the
+    // app runs in it, unseen, until it shows it (a tray app).
+    let shown = !held && launch.visible_at_launch();
+    if shown {
+        show_launched(&window, view.surface(), options.background);
+    } else if !held {
+        log::info!("the main window starts hidden (nsh.json window.defaultVisible: false)");
     }
     let view_surface = view.surface().clone();
     RUNNING.with(|r| {
@@ -910,13 +1091,18 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
             window,
             view,
             keep_alive_on_close: options.keep_alive_on_close,
+            #[cfg(feature = "dev")]
+            background: options.background,
+            #[cfg(feature = "dev")]
+            held: Cell::new(held),
         })
     });
     // The mode it opens in, once it shows.
-    crate::window::launched_main(&view_surface, kept.map(|p| p.mode).or(launch.default_mode));
-    for url in URL_SCHEMES.with(|links| std::mem::take(&mut *links.borrow_mut())) {
-        url_scheme(url);
-    }
+    crate::window::launched_main(
+        &view_surface,
+        kept.map(|p| p.mode).or(launch.default_mode),
+        shown,
+    );
     app.run();
     stop_running();
     app.setDelegate(None);
@@ -976,88 +1162,37 @@ fn secondary(frames: &[NSRect]) -> Option<usize> {
     frames.iter().position(|f| f != primary)
 }
 
-/// The app menu (About, Hide, Quit), Edit (the text commands fields
-/// answer: undo, cut, copy, paste, select all) and Window (minimize, zoom,
-/// full screen, close).
-fn main_menu(mtm: MainThreadMarker, title: &str) -> Retained<NSMenu> {
-    let bar = NSMenu::new(mtm);
-    let item = |menu: &NSMenu, title: &str, action: Option<objc2::runtime::Sel>, key: &str| {
-        // SAFETY: the actions are AppKit's standard ones, sent down the
-        // responder chain.
-        let item = unsafe {
-            NSMenuItem::initWithTitle_action_keyEquivalent(
-                NSMenuItem::alloc(mtm),
-                &NSString::from_str(title),
-                action,
-                &NSString::from_str(key),
-            )
-        };
-        menu.addItem(&item);
-        item
-    };
-    let submenu = |name: &str| {
-        let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(name));
-        let holder = item(&bar, name, None, "");
-        holder.setSubmenu(Some(&menu));
-        menu
-    };
-    let app_menu = submenu(title);
-    item(
-        &app_menu,
-        &format!("About {title}"),
-        Some(sel!(orderFrontStandardAboutPanel:)),
-        "",
-    );
-    app_menu.addItem(&NSMenuItem::separatorItem(mtm));
-    item(&app_menu, &format!("Hide {title}"), Some(sel!(hide:)), "h");
-    let others = item(
-        &app_menu,
-        "Hide Others",
-        Some(sel!(hideOtherApplications:)),
-        "h",
-    );
-    others
-        .setKeyEquivalentModifierMask(NSEventModifierFlags::Command | NSEventModifierFlags::Option);
-    app_menu.addItem(&NSMenuItem::separatorItem(mtm));
-    item(
-        &app_menu,
-        &format!("Quit {title}"),
-        Some(sel!(terminate:)),
-        "q",
-    );
-
-    let edit = submenu("Edit");
-    item(&edit, "Undo", Some(sel!(undo:)), "z");
-    // An uppercase key equivalent is Shift with it.
-    item(&edit, "Redo", Some(sel!(redo:)), "Z");
-    edit.addItem(&NSMenuItem::separatorItem(mtm));
-    item(&edit, "Cut", Some(sel!(cut:)), "x");
-    item(&edit, "Copy", Some(sel!(copy:)), "c");
-    item(&edit, "Paste", Some(sel!(paste:)), "v");
-    item(&edit, "Select All", Some(sel!(selectAll:)), "a");
-
-    let window = submenu("Window");
-    item(&window, "Minimize", Some(sel!(performMiniaturize:)), "m");
-    item(&window, "Zoom", Some(sel!(performZoom:)), "");
-    let full = item(
-        &window,
-        "Enter Full Screen",
-        Some(sel!(toggleFullScreen:)),
-        "f",
-    );
-    full.setKeyEquivalentModifierMask(
-        NSEventModifierFlags::Command | NSEventModifierFlags::Control,
-    );
-    window.addItem(&NSMenuItem::separatorItem(mtm));
-    item(&window, "Close", Some(sel!(performClose:)), "w");
-    bar
-}
-
 #[cfg(test)]
 mod tests {
+    use objc2_app_kit::NSApplicationActivationPolicy;
     use objc2_foundation::{NSPoint, NSRect, NSSize};
 
-    use super::secondary;
+    use super::{ActivationPolicy, AppOptions, activation_policy, secondary};
+
+    /// The app's policy, unless it runs in the background, which never
+    /// activates it.
+    #[test]
+    fn the_activation_policy_is_the_apps_unless_it_runs_in_the_background() {
+        let options = |background, activation_policy| AppOptions {
+            background,
+            activation_policy,
+            ..AppOptions::default()
+        };
+        assert_eq!(
+            activation_policy(&AppOptions::default()),
+            NSApplicationActivationPolicy::Regular
+        );
+        assert_eq!(
+            activation_policy(&options(false, ActivationPolicy::Accessory)),
+            NSApplicationActivationPolicy::Accessory
+        );
+        for policy in [ActivationPolicy::Regular, ActivationPolicy::Accessory] {
+            assert_eq!(
+                activation_policy(&options(true, policy)),
+                NSApplicationActivationPolicy::Prohibited
+            );
+        }
+    }
 
     fn frame(x: f64, y: f64, w: f64, h: f64) -> NSRect {
         NSRect::new(NSPoint::new(x, y), NSSize::new(w, h))

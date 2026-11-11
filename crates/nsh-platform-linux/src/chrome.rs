@@ -177,6 +177,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::OpenWindow(_) => {}
         // GTK's menu bar always shows.
         DesktopCommand::SetMenuBar(_) => {}
+        // App-owned menu labels are supported by the macOS and Windows native hosts.
+        DesktopCommand::SetMenuLabels(_) => {}
         DesktopCommand::SetTray(tray) => crate::tray::set(surface, tray.as_ref()),
         DesktopCommand::RegisterGlobalShortcut { id, shortcut } => {
             crate::global_shortcut::register(surface, *id, *shortcut)

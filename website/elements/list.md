@@ -103,7 +103,7 @@ touches and UI tests meet each row once.
 | `viewport` | `.viewport(ListViewport::..)` | `"own" \| "parent"` | `"own"` | `"own"`: the list scrolls in a scroll view of its own. `"parent"`: it lies at its full length in its parent's layout and renders the rows near the viewport of the scroll view around it, which scrolls it with the rest of the page (see [lists in a page](../docs/lists.md#lists-in-a-page-viewportparent)). Chosen when the list is made. |
 | `numColumns` | `.columns(n)` | `number` | `1` | Items per row (vertical lists). |
 | `inverted` | `.inverted()` | `boolean` | `false` | Laid out from the end, item 0 last (chat style): starts scrolled to the end and keeps its distance from the end as content changes. |
-| `maintainVisibleContentPosition` | `.follow_end(px(threshold))` | `{ autoscrollToBottomThreshold?: number }` | | For lists that are not inverted: at the end of the content, or within that many points of it, the list stays at the end as the content grows or the viewport shrinks; scrolled further up, the visible content stays. |
+| `maintainVisibleContentPosition` | `.follow_end(px(threshold))` | `{ autoscrollToBottomThreshold?: number }` | | For lists that are not inverted: at the end of the content, or within that many points of it, the list stays at the end as content and viewport sizes change; scrolled further up, the visible content stays. |
 | `stickyHeaderIndices` | `.sticky_header_indices([..])` | `number[]` | | Items that stick to the start while scrolled past (one column, not inverted). |
 | `contentStyle` | `.content_padding(..)`, `.content_padding_x(..)`, `.row_gap(..)`, `.column_gap(..)`, … | `ListContentStyle` | | Padding and gaps of the content, in points: `padding`, `paddingHorizontal`, `paddingVertical`, `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`, `gap`, `rowGap`, `columnGap`. |
 | `contentClass` | | `string` | | Padding and gaps of the content as classes (`p-*`, `gap-*`); `contentStyle` wins over them. |
@@ -112,6 +112,7 @@ touches and UI tests meet each row once.
 | `empty` | `.empty(el)` | `ListSlot` | | Shown instead of the items while `each` is empty. |
 | `separator` | `.separator(\|\| el)` | `ListSlot` | | Between items (one column). |
 | `initialScrollIndex` | `.initial_scroll_index(i)` | `number` | | Scrolls to this item before the first frame. |
+| `initialScrollAtEnd` | `.initial_scroll_at_end()` | `boolean` | `false` | Opens at the end before the first frame and follows it while rows measure. Short content stays at the top. In TSX this takes precedence over `initialScrollIndex`; in Rust the last initial-scroll builder wins. |
 | `keyExtractor` | `.keys(\|\| ids)` | `(item: T, index: number) => string` | `item.key`, `item.id` or the index | The key of an item in viewability tokens. In Rust, the rows' identities, so rows keep their cells and sizes when rows come and go before them. In TSX, rows whose keys match are the same rows even when `each` holds new objects, so rebuilding the rows (say in a `computed`) keeps their sizes and the reader's place; without it, rows are compared by identity. |
 | `onLoadMore` | `.on_load_more(..)` | `() => void` | | The end is near: load more. |
 | `loadMoreThreshold` | `.load_more_threshold(viewports)` | `number` | `1` | How close to the end (in viewports) `onLoadMore` fires. |
@@ -171,6 +172,7 @@ viewable rows, `changed()` the rows that came or went.
 | `scrollToOffset({ offset, animated? })` | `scroll_to_offset(px(..), animated)` | Scrolls to an offset along the list's axis. |
 | `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | Scrolls to the end of the content (the start of an inverted list). |
 | `scrollTo({ x?, y?, animated? })` | `scroll_to(point(..), animated)` | Scrolls to an offset. |
+| `measureScrollPosition()` | `measure_scroll_position()` | Where the viewport starts among the rows, once this turn's changes are laid out: `{ index, offset }`, the row there and how far into it, as the list lays its rows out; `null` without items. See [keeping a reading position](../docs/lists.md#keeping-a-reading-position). |
 
 ## Examples
 

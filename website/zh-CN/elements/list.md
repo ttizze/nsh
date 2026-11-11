@@ -91,7 +91,7 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | `viewport` | `.viewport(ListViewport::..)` | `"own" \| "parent"` | `"own"` | `"own"`：列表在自己的滚动视图中滚动。`"parent"`：列表没有自己的滚动视图，以完整长度排在父视图的布局中，只渲染外层滚动视图视口附近的行，随页面一起滚动（见[页面中的列表](../docs/lists.md#页面中的列表viewportparent)）。在列表创建时确定。 |
 | `numColumns` | `.columns(n)` | `number` | `1` | 每行的条目数（纵向列表）。 |
 | `inverted` | `.inverted()` | `boolean` | `false` | 从末端开始布局，第 0 项在最后（聊天样式）：初始滚动到末端，内容变化时保持与末端的距离。 |
-| `maintainVisibleContentPosition` | `.follow_end(px(threshold))` | `{ autoscrollToBottomThreshold?: number }` | | 用于非倒序列表：位于内容末端或距末端不超过该点数时，内容增长或视口缩小时列表保持在末端；向上滚得更远时，可见内容保持不动。 |
+| `maintainVisibleContentPosition` | `.follow_end(px(threshold))` | `{ autoscrollToBottomThreshold?: number }` | | 用于非倒序列表：位于内容末端或距末端不超过该点数时，内容或视口尺寸变化时列表保持在末端；向上滚得更远时，可见内容保持不动。 |
 | `stickyHeaderIndices` | `.sticky_header_indices([..])` | `number[]` | | 滚动经过时吸附在起始端的条目（单列、非倒序）。 |
 | `contentStyle` | `.content_padding(..)`、`.content_padding_x(..)`、`.row_gap(..)`、`.column_gap(..)` 等 | `ListContentStyle` | | 内容的内边距和间距（点）：`padding`、`paddingHorizontal`、`paddingVertical`、`paddingTop`、`paddingRight`、`paddingBottom`、`paddingLeft`、`gap`、`rowGap`、`columnGap`。 |
 | `contentClass` | | `string` | | 以类名（`p-*`、`gap-*`）给出的内容内边距和间距；`contentStyle` 优先。 |
@@ -100,6 +100,7 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | `empty` | `.empty(el)` | `ListSlot` | | `each` 为空时代替条目显示。 |
 | `separator` | `.separator(\|\| el)` | `ListSlot` | | 条目之间的分隔（单列）。 |
 | `initialScrollIndex` | `.initial_scroll_index(i)` | `number` | | 第一帧之前先滚动到该条目。 |
+| `initialScrollAtEnd` | `.initial_scroll_at_end()` | `boolean` | `false` | 首帧前滚动到末尾并在行高测量时保持末尾位置。短内容从顶部排列；TSX 中优先于 `initialScrollIndex`；Rust 中最后调用的初始滚动方法生效。 |
 | `keyExtractor` | `.keys(\|\| ids)` | `(item: T, index: number) => string` | `item.key`、`item.id` 或索引 | 条目在可见性 token 中的 key。在 Rust 中是各行的标识，前面的行增删时，行保留自己的单元格和尺寸。在 TSX 中，key 相同的行就算 `each` 换成了新对象也视为同一行，因此重建行数据（例如在 `computed` 里）不会丢掉行高和阅读位置；不设置时按对象是否相同比较。 |
 | `onLoadMore` | `.on_load_more(..)` | `() => void` | | 快到末端了：加载更多。 |
 | `loadMoreThreshold` | `.load_more_threshold(viewports)` | `number` | `1` | 距末端多近（以视口为单位）时触发 `onLoadMore`。 |
@@ -153,6 +154,7 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | `scrollToOffset({ offset, animated? })` | `scroll_to_offset(px(..), animated)` | 沿列表方向滚动到某个偏移。 |
 | `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | 滚动到内容末端（倒序列表则是起始端）。 |
 | `scrollTo({ x?, y?, animated? })` | `scroll_to(point(..), animated)` | 滚动到某个偏移。 |
+| `measureScrollPosition()` | `measure_scroll_position()` | 本轮改动排版后，视口起点落在哪一行：`{ index, offset }`，即那一行和视口起点在行内多深，与列表排行时一致；没有条目时为 `null`。见[记住阅读位置](../docs/lists.md#keeping-a-reading-position)。 |
 
 ## 示例
 

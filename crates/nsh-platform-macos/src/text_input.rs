@@ -36,7 +36,9 @@
 //! `textDidChange:`), and as it ends, after the `onChangeText` of the
 //! committed text. A value from JS that comes during a composition waits for its
 //! end: setting the text then would end the input method's session and
-//! commit what it composes.
+//! commit what it composes. Leaving the input commits the composition, as
+//! a browser's blur does ([`commit_marked`]): what was composed stays and
+//! is reported before the composition ends.
 //!
 //! Focus follows desktop habits: Tab moves between fields (the window
 //! recalculates its key view loop), Escape leaves the field, and clicking
@@ -74,7 +76,7 @@ use objc2_app_kit::{
 use objc2_core_foundation::{CGFloat, CGSize};
 use objc2_foundation::{
     NSAttributedString, NSDictionary, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRange,
-    NSString,
+    NSRect, NSString,
 };
 
 use crate::{
@@ -845,6 +847,18 @@ macro_rules! define_field {
                     ok
                 }
 
+                /// Its field editor is about to end editing: what an input
+                /// method composes there is committed first.
+                #[unsafe(method(textShouldEndEditing:))]
+                fn text_should_end_editing(&self, text: &NSText) -> bool {
+                    if let Some(editor) = text.downcast_ref::<NSTextView>() {
+                        commit_marked(editor);
+                    }
+                    // SAFETY: NSTextField's own handling (it implements
+                    // NSTextDelegate).
+                    unsafe { msg_send![super(self), textShouldEndEditing: text] }
+                }
+
                 #[unsafe(method(textDidEndEditing:))]
                 fn text_did_end_editing(&self, notification: &NSNotification) {
                     // SAFETY: NSTextField's own handling of its field
@@ -960,6 +974,17 @@ macro_rules! define_text_view {
             impl $name {
                 $($methods)*
 
+                /// The Edit menu's Copy (Cmd+C): the editor's own selection,
+                /// else the text selected around the input while it keeps
+                /// the focus (a chat's messages above its composer).
+                #[unsafe(method(copy:))]
+                fn copy(&self, sender: Option<&AnyObject>) {
+                    if !copies_selection_around(self, $surface(self)) {
+                        // SAFETY: NSTextView's own method.
+                        let _: () = unsafe { msg_send![super(self), copy: sender] };
+                    }
+                }
+
                 #[unsafe(method(draggingEntered:))]
                 fn dragging_entered(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
                     $surface(self)
@@ -1062,6 +1087,7 @@ define_text_view!(
 
         #[unsafe(method(resignFirstResponder))]
         fn resign_first_responder(&self) -> bool {
+            commit_marked(self);
             // SAFETY: NSTextView's own method.
             let ok: bool = unsafe { msg_send![super(self), resignFirstResponder] };
             if ok && let Some(cx) = self.ivars().get() {
@@ -1079,6 +1105,26 @@ define_text_view!(
             if let Some(cx) = self.ivars().get() {
                 cx.composition_changed();
             }
+        }
+
+        /// Where an input method opens its candidates. TextKit 2 lays out
+        /// only the text near the visible part and has no rect for the
+        /// rest (a point-wide view, a line per character, soon holds
+        /// such text): the visible part, not the screen's corner.
+        #[unsafe(method(firstRectForCharacterRange:actualRange:))]
+        fn first_rect(&self, range: NSRange, actual: *mut NSRange) -> NSRect {
+            // SAFETY: NSTextView's own method (NSTextInputClient); `actual`
+            // is the caller's.
+            let rect: NSRect = unsafe {
+                msg_send![super(self), firstRectForCharacterRange: range, actualRange: actual]
+            };
+            if rect != NSRect::ZERO {
+                return rect;
+            }
+            let Some(window) = self.window() else {
+                return rect;
+            };
+            window.convertRectToScreen(self.convertRect_toView(self.visibleRect(), None))
         }
 
         /// A paste (Edit > Paste, Command+V, the context menu): reported,
@@ -1100,11 +1146,16 @@ define_text_view!(
         }
 
         /// Paste is offered for images and files too while the app
-        /// listens.
+        /// listens; Copy for text selected around the input.
         #[unsafe(method(validateUserInterfaceItem:))]
         fn validate(&self, item: &ProtocolObject<dyn NSValidatedUserInterfaceItem>,
         ) -> objc2::runtime::Bool {
             if item.action() == Some(sel!(paste:)) && self.ivars().get().is_some_and(Ctx::pastes_more) {
+                return objc2::runtime::Bool::YES;
+            }
+            if item.action() == Some(sel!(copy:))
+                && copy_falls_through(self, area_surface(self).as_deref())
+            {
                 return objc2::runtime::Bool::YES;
             }
             // SAFETY: NSTextView's own method.
@@ -1116,6 +1167,22 @@ define_text_view!(
 /// The surface of text area `area`, for its drags.
 fn area_surface(area: &TextArea) -> Option<Rc<Surface>> {
     area.ivars().get()?.surface.upgrade()
+}
+
+/// Whether a copy in `text_view` takes the text selected in `surface`
+/// instead: the editor has nothing of its own selected, and the surface
+/// has a selection (an input keeps the focus while text around it is
+/// selected).
+fn copy_falls_through(text_view: &NSTextView, surface: Option<&Surface>) -> bool {
+    text_view.selectedRange().length == 0 && surface.is_some_and(crate::text::can_copy)
+}
+
+/// A copy in `text_view` (an input's editor): copies the text selected
+/// around it, if [`copy_falls_through`]. False if the editor copies its
+/// own.
+fn copies_selection_around(text_view: &NSTextView, surface: Option<Rc<Surface>>) -> bool {
+    let surface = surface.as_deref();
+    copy_falls_through(text_view, surface) && surface.is_some_and(crate::text::copy)
 }
 
 /// A test's paste (`nsh test --target macos`): `content` on a pasteboard of
@@ -1229,11 +1296,16 @@ define_text_view!(
         }
 
         /// Paste is offered for images and files too while the app
-        /// listens.
+        /// listens; Copy for text selected around the input.
         #[unsafe(method(validateUserInterfaceItem:))]
         fn validate(&self, item: &ProtocolObject<dyn NSValidatedUserInterfaceItem>,
         ) -> objc2::runtime::Bool {
             if item.action() == Some(sel!(paste:)) && field_ctx(self).is_some_and(|cx| cx.pastes_more()) {
+                return objc2::runtime::Bool::YES;
+            }
+            if item.action() == Some(sel!(copy:))
+                && copy_falls_through(self, editor_surface(self).as_deref())
+            {
                 return objc2::runtime::Bool::YES;
             }
             // SAFETY: NSTextView's own method.
@@ -2033,9 +2105,21 @@ fn auto_focus(surface: &Rc<Surface>, input: &Rc<InputState>) {
     });
 }
 
+/// The input view's frame changed (`crate::view::NshView::place`): places
+/// the editor again, or hides it while the view has no area.
+pub(crate) fn resized(view: &NshView) {
+    let Some(input) = view.state().input.clone() else {
+        return;
+    };
+    place(view, &input);
+}
+
 /// Places the pad over the whole view and the editor (and a text view's
 /// placeholder) in it at the content box (`crate::native::resized` keeps
-/// the pad at the view's size).
+/// the pad at the view's size). While the view or its content box has no
+/// area (a `display: none` subtree lays its views out at a zero frame) the
+/// pad is hidden: it does not clip, so the editor would keep drawing at its
+/// last frame.
 fn place(view: &NshView, input: &InputState) {
     let frame = view.state().frame;
     let bounds = Bounds {
@@ -2049,7 +2133,12 @@ fn place(view: &NshView, input: &InputState) {
         },
     };
     let content = input.content.get().unwrap_or(bounds);
-    if content.size.width.0 <= 0.0 || content.size.height.0 <= 0.0 {
+    let empty = |r: Bounds<Points>| r.size.width.0 <= 0.0 || r.size.height.0 <= 0.0;
+    let hidden = empty(bounds) || empty(content);
+    if input.pad.isHidden() != hidden {
+        input.pad.setHidden(hidden);
+    }
+    if hidden {
         return;
     }
     view.set_native(&input.pad, bounds);
@@ -2204,6 +2293,26 @@ pub(crate) fn blur_all(surface: &Rc<Surface>) {
             to_root(&window, surface);
         }
     }
+}
+
+/// Commits what an input method composes in `view` (its marked text) as
+/// the editor loses the focus, as a browser's blur does: the input method
+/// drops its session and the composed text is inserted as its commit
+/// inserts it, so the input reports the text before the composition's end.
+/// AppKit would unmark it in place, which the input hears of as a
+/// selection change while the text is being replaced, and so ended the
+/// composition first.
+fn commit_marked(view: &NSTextView) {
+    if !view.hasMarkedText() {
+        return;
+    }
+    let range = view.markedRange();
+    let composed = view.string().substringWithRange(range);
+    if let Some(context) = view.inputContext() {
+        context.discardMarkedText();
+    }
+    // SAFETY: an NSString over the marked range, which is in the text.
+    unsafe { view.insertText_replacementRange(&composed, range) };
 }
 
 /// Ends editing and gives the keyboard focus to the root `window` shows.

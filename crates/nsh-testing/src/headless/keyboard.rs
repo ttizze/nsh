@@ -3,15 +3,18 @@
 //! phones and tablets have one too, a tablet's keyboard, a Chromebook's).
 //! The app's shortcuts (`nsh/keymap`) take it first, as the platforms'
 //! keymaps do: the newest binding of the keystroke that fires where the
-//! focus is reports `onKeyCommand`. Else Tab moves the keyboard focus
-//! between the inputs and the views that are its stops (those that take
-//! presses, and `focusable` ones that take none) where the platform
-//! does (macOS, the web), Return and Space press the pressable it is on,
-//! Shift+F10 asks it for its context menu (the web, Linux), the
+//! focus is reports `onKeyCommand`. Then, on a desktop, the application
+//! menu's item with that shortcut is chosen (`onMenu`). Else Tab moves the
+//! keyboard focus between the inputs and the views that are its stops
+//! (those that take presses, and `focusable` ones that take none) where the
+//! platform does (macOS, the web), Return and Space press the pressable it
+//! is on, Shift+F10 asks it for its context menu (the web, Linux), the
 //! focused input takes the keys that edit it, and Escape goes back.
 
 use nsh_core::{
     Command, EventKind, EventPayload, MountBatch, MountItem, NodeId, PayloadValue, ROOT_ID,
+    desktop::{MenuItem, Shortcut},
+    geometry::Points,
     keymap::{Key, KeyMatch, Keystroke},
     platform::Os,
     tailwind::state::FOCUSED,
@@ -52,17 +55,26 @@ impl Headless {
     /// `nsh/keymap` names it (`"mod+k"`, `"shift+tab"`, `"escape"`; `mod` is
     /// the app's platform's command key). A binding of the app's keymap
     /// that fires where the focus is hears it (`onKeyCommand`), and takes
-    /// the key unless it passes it through; else the focused input takes a character, Backspace or the return key, and
+    /// the key unless it passes it through; then, on a desktop, the
+    /// application menu's item with that shortcut is chosen; else the
+    /// focused input takes a character, Backspace or the return key, and
     /// Escape goes back as the desktops' back key does when there is
     /// something to go back from.
     pub fn press_key(&mut self, keys: &str) -> Result<(), String> {
         self.step(format!("keyboard.press({keys})"));
+        self.input_with(nsh_core::platform::InputModality::Keyboard);
         let stroke = Keystroke::parse(keys, self.environment.os).map_err(|e| e.to_string())?;
         let editing = self.screen.focused().is_some();
         // A hardware keyboard fires the app's shortcuts (`on_key`,
-        // `keymap.bind`), on every platform.
+        // `keymap.bind`), on every platform: those of the focused window
+        // and those of no window, as the desktops match them.
+        let window = self
+            .windows
+            .as_ref()
+            .and_then(|w| w.focused())
+            .unwrap_or(ROOT_ID);
         let found = match self.screen.keymap() {
-            Some(keymap) => keymap.find(stroke, editing, false),
+            Some(keymap) => keymap.find_in(window, stroke, editing, false),
             None => KeyMatch::None,
         };
         if let Some(id) = found.fired() {
@@ -78,6 +90,29 @@ impl Headless {
             return self.done();
         }
         let m = stroke.modifiers;
+        // Then the application menu's shortcuts choose its items, on a
+        // desktop, as the platforms' menus do after the keymap; an item that
+        // leaves the key to the focused field does not take it.
+        let apple = matches!(self.environment.os, Os::MacOs | Os::Ios);
+        if self.environment.desktop()
+            && let Ok(pressed) = Shortcut::parse(keys, apple)
+            && let Some((id, fires)) = self.screen.app_menu().and_then(|items| {
+                MenuItem::find_shortcut(items, &pressed)
+                    .map(|a| (a.id, !editing || a.fires_while_editing()))
+            })
+            && fires
+        {
+            // A role item (id 0: Quit, Hide) is the system's on a platform:
+            // here it takes the key and does nothing.
+            if id != 0 {
+                self.engine.control().dispatch_event(
+                    ROOT_ID,
+                    EventKind::Menu,
+                    EventPayload::Map(vec![("id", PayloadValue::Number(f64::from(id)))]),
+                );
+            }
+            return self.done();
+        }
         let plain = !(m.ctrl || m.alt || m.cmd);
         // The key goes to the focused window: Escape closes one of the app's
         // own that says so (`closeOnEscape`), natively.
@@ -179,6 +214,42 @@ impl Headless {
             return;
         };
         self.move_focus(Some(stops[next]));
+        self.reveal(stops[next]);
+    }
+
+    /// The scroll views around `id`, which the keyboard focus reached,
+    /// scroll so that it shows, innermost first, as the platforms scroll
+    /// them for a focus Tab moves (at once here: no animation).
+    fn reveal(&mut self, id: NodeId) {
+        for view in self.screen.scrolls_around(id) {
+            let (Some(target), Some(viewport), Some(scroll)) = (
+                self.screen.bounds_in_root(id),
+                self.screen.bounds_in_root(view),
+                self.screen.scroll(view),
+            ) else {
+                continue;
+            };
+            let (start, len, dim, offset) = if scroll.horizontal {
+                (
+                    target.origin.x - viewport.origin.x,
+                    target.size.width,
+                    viewport.size.width,
+                    scroll.x,
+                )
+            } else {
+                (
+                    target.origin.y - viewport.origin.y,
+                    target.size.height,
+                    viewport.size.height,
+                    scroll.y,
+                )
+            };
+            let delta = nsh_core::scroll::reveal_focus_delta(start, start + len, dim);
+            let to = (offset + delta).clamp(Points::ZERO, self.screen.scroll_end(view));
+            if (to - offset).abs() >= Points(0.5) {
+                self.scroll_to(view, to);
+            }
+        }
     }
 
     /// Moves the keyboard focus to `to` (an input or a view), telling

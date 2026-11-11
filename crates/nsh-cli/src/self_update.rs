@@ -67,13 +67,16 @@ struct ReleaseInfo {
     version: String,
     /// The full revision of `main` it was built from.
     commit: String,
+    /// The UTC day it was built, `YYYY-MM-DD`; older descriptions lack it.
+    #[serde(default)]
+    date: Option<String>,
 }
 
 /// What the channel offers.
 struct Offer {
     /// The release's tag, for its download URLs.
     tag: String,
-    /// How it is shown: `0.5.0`, `0.4.0 (abcdef0 nightly)`.
+    /// How it is shown: `0.5.0`, `0.4.0 (abcdef0 nightly 2026-11-10)`.
     label: String,
     /// Whether it differs from this build in the way that matters: a newer
     /// version on the stable channel, another revision on the nightly one,
@@ -209,8 +212,11 @@ fn asset() -> anyhow::Result<String> {
 pub(crate) fn host() -> anyhow::Result<&'static str> {
     Ok(match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => "macos-arm64",
+        ("macos", "x86_64") => "macos-x86_64",
         ("linux", "x86_64") => "linux-x86_64",
+        ("linux", "aarch64") => "linux-arm64",
         ("windows", "x86_64") => "windows-x86_64",
+        ("windows", "aarch64") => "windows-arm64",
         (os, arch) => bail!("no prebuilt nsh for {os} {arch}; build it from source"),
     })
 }
@@ -309,7 +315,10 @@ fn nightly(agent: &ureq::Agent, current: Channel) -> anyhow::Result<Offer> {
     let short = info.commit.get(..7).unwrap_or(&info.commit);
     Ok(Offer {
         tag: NIGHTLY.to_owned(),
-        label: format!("{} ({short} nightly)", info.version),
+        label: match &info.date {
+            Some(date) => format!("{} ({short} nightly {date})", info.version),
+            None => format!("{} ({short} nightly)", info.version),
+        },
         newer: current != Channel::Nightly || !info.commit.starts_with(env!("NSH_GIT_SHA")),
     })
 }

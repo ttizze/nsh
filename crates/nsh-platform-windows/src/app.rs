@@ -10,7 +10,9 @@ use std::{
 };
 
 use nsh_core::{
-    desktop::{Backdrop, MainWindowOptions, WindowMode, WindowPlacement, WindowPosition},
+    desktop::{
+        Backdrop, MainWindowOptions, MenuLabels, WindowMode, WindowPlacement, WindowPosition,
+    },
     geometry::{Size, px},
     platform::{Appearance, Locale},
 };
@@ -119,7 +121,7 @@ pub struct AppOptions {
     /// Log per-commit timings.
     pub trace: bool,
     /// Logs the performance monitor's readings once a second (target
-    /// `nsh::perf`): frame rate, frame phases, commits, CPU, memory.
+    /// `nsh::fps`): frame rate, frame phases, commits, CPU, memory.
     pub fps: bool,
     /// Where bundled assets are (for [`AppSource::Bundle`]); dev servers
     /// serve them themselves.
@@ -188,10 +190,28 @@ pub struct AppOptions {
     pub host: nsh_engine::HostChannel,
     /// The URL schemes the app opens (nsh.json `schemes`, from the
     /// package's `nsh\app.json`): [`run_app`] registers them for the
-    /// current user, sends the URL it was started with as `EventKind::UrlScheme`
-    /// and keeps one instance, a later launch with a URL handing it to the
-    /// running one. Empty: none of that.
+    /// current user, sends the URL it was started with as
+    /// `EventKind::UrlScheme` before the app's code first runs and keeps one
+    /// instance, a later launch with a URL handing it to the running one.
+    /// Empty: none of that.
     pub schemes: Vec<String>,
+    /// The app runs once (nsh.json `singleInstance`, from the package's
+    /// `nsh\app.json`): [`run_app`] hands a later launch's arguments and
+    /// working directory to the running instance, which brings its window
+    /// forward and tells the app (`Application.on("secondInstance", ...)`),
+    /// and exits before it opens a window.
+    pub single_instance: bool,
+    /// The file types the app opens (nsh.json `fileTypes`, from the
+    /// package's `nsh\app.json`): [`run_app`] registers them for the
+    /// current user (Open With) and hands the files it is started with to
+    /// the app (`Application.on("openFiles", ...)`), a later
+    /// launch with files handing them to the running instance.
+    pub file_types: Vec<nsh_core::file_type::FileType>,
+    /// The labels of the menus the view makes in the app's language: the
+    /// edit menus of its text fields and selectable text, and the items
+    /// with a role and no label of their own in the app's menus. English
+    /// for what it does not label.
+    pub menu_labels: MenuLabels,
 }
 
 impl Default for AppOptions {
@@ -213,8 +233,11 @@ impl Default for AppOptions {
             cache: Default::default(),
             storage: None,
             schemes: Vec::new(),
+            single_instance: false,
+            file_types: Vec::new(),
             notifications: false,
             host: nsh_engine::HostChannel::default(),
+            menu_labels: MenuLabels::default(),
         }
     }
 }
@@ -250,8 +273,6 @@ pub struct AppView {
     surface: Rc<Surface>,
     hwnd: HWND,
     options: RefCell<AppOptions>,
-    /// The mode the main window takes once shown (nsh.json `window`).
-    opening_mode: Cell<Option<WindowMode>>,
     #[cfg(feature = "dev")]
     pub(crate) dev: RefCell<Option<crate::dev::DevSession>>,
 }
@@ -274,6 +295,7 @@ impl AppView {
     ) -> windows::core::Result<Rc<AppView>> {
         let surface = Surface::new(initial_environment());
         surface.appearance.set(options.appearance);
+        surface.chrome.labels.replace(options.menu_labels.clone());
         if options.notifications {
             crate::notifications::start_app(
                 &options.app_id,
@@ -306,7 +328,6 @@ impl AppView {
             surface,
             hwnd,
             options: RefCell::new(options),
-            opening_mode: Cell::new(None),
             #[cfg(feature = "dev")]
             dev: RefCell::new(None),
         });
@@ -325,17 +346,7 @@ impl AppView {
     /// Shows a top-level view's window (in the mode nsh.json `window`
     /// opens it in).
     pub fn show(&self) {
-        // Composite the window only once its background is drawn: DWM
-        // otherwise shows and animates the default light client surface,
-        // which flashes white on a dark appearance until the first frame.
-        crate::window::set_cloaked(self.hwnd, true);
-        crate::window::fill_background(&self.surface, self.hwnd);
-        self.surface.paint();
-        crate::window::show(self.hwnd);
-        crate::window::set_cloaked(self.hwnd, false);
-        if let Some(mode) = self.opening_mode.take() {
-            crate::window_state::set_mode(self.hwnd, mode);
-        }
+        show_main(&self.surface, self.hwnd);
     }
 
     /// Gives the main window what nsh.json `window` sets (`launch`): its
@@ -389,7 +400,8 @@ impl AppView {
         if visible {
             crate::window_state::set_mode(hwnd, mode);
         } else {
-            self.opening_mode
+            self.surface
+                .main_opening_mode
                 .set(Some(mode).filter(|m| *m != WindowMode::Normal));
         }
     }
@@ -432,6 +444,7 @@ impl AppView {
             app,
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
+            content_culling: true,
             network: Some(nsh_engine::net::network()),
             websocket: None,
             refuse_connections: None,
@@ -534,6 +547,8 @@ fn initial_environment() -> Environment {
         file_requests: true,
         notifications: true,
         audio: true,
+        // wgpu, in builds with it, until it finds no GPU.
+        shaders: nsh_engine::shader::LINKED,
         ..Environment::default()
     }
 }
@@ -631,9 +646,13 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let _ = OleInitialize(None);
     }
-    if let crate::linking::Start::Forwarded =
-        crate::linking::start(&options.app_id, &options.title, &options.schemes)
-    {
+    if let crate::linking::Start::Forwarded = crate::linking::start(
+        &options.app_id,
+        &options.title,
+        &options.schemes,
+        &options.file_types,
+        options.single_instance,
+    ) {
         return std::process::ExitCode::SUCCESS;
     }
     // The app to run, when it is known now (a dev server's comes later).
@@ -643,6 +662,9 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
         #[cfg(feature = "dev")]
         AppSource::DevServer(_) => None,
     };
+    // A development host's window waits for its app, which brings the
+    // window's options ([`crate::dev`]).
+    let held = app.is_none();
     // nsh.json `window` (a bundle's, or compiled into a Rust app's root):
     // known before the window is made, so that its first frame has it.
     let launch = app
@@ -678,6 +700,7 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
             return std::process::ExitCode::FAILURE;
         }
     };
+    crate::linking::launch(view.surface());
     match source {
         AppSource::Rust(root) => view.load(App::Rust(root)),
         AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
@@ -688,7 +711,15 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     crate::linking::attach(view.surface());
     install_shortcuts(&view);
     view.place_main_window(&launch, kept);
-    view.show();
+    // nsh.json `window.defaultVisible: false`: the window is made and the
+    // app runs in it, unseen, until it shows it (a tray app).
+    if !held {
+        if launch.visible_at_launch() {
+            view.show();
+        } else {
+            log::info!("the main window starts hidden (nsh.json window.defaultVisible: false)");
+        }
+    }
     let code = crate::window::run_loop();
     view.stop();
     drop(view);
@@ -710,6 +741,22 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
         std::process::ExitCode::SUCCESS
     } else {
         std::process::ExitCode::FAILURE
+    }
+}
+
+/// Shows `surface`'s top-level window `hwnd`, in the mode nsh.json
+/// `window` opens it in. DWM composites it only once its background is
+/// drawn: it otherwise shows and animates the default light client surface,
+/// which flashes white on a dark appearance until the first frame.
+pub(crate) fn show_main(surface: &Rc<Surface>, hwnd: HWND) {
+    surface.main_unshown.set(false);
+    crate::window::set_cloaked(hwnd, true);
+    crate::window::fill_background(surface, hwnd);
+    surface.paint();
+    crate::window::show(hwnd);
+    crate::window::set_cloaked(hwnd, false);
+    if let Some(mode) = surface.main_opening_mode.take() {
+        crate::window_state::set_mode(hwnd, mode);
     }
 }
 

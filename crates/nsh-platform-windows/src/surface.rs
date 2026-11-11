@@ -22,8 +22,10 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
-use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size};
-use nsh_engine::{Engine, EngineConfig, EngineControl, Environment, MountSink};
+use nsh_core::{
+    Command, EventKind, EventPayload, MountBatch, MountItem, NodeId, Points, ROOT_ID, Size,
+};
+use nsh_engine::{Engine, EngineConfig, EngineControl, Environment, MainThreadTask, MountSink};
 use rustc_hash::FxHashMap;
 use windows::Win32::Foundation::{HWND, RECT};
 
@@ -42,6 +44,9 @@ enum Message {
     HotUpdateFailed,
     /// The engine laid the app out at this size ([`MountSink::resized`]).
     Resized(Size<Points>),
+    /// A function the app runs on the main thread
+    /// ([`MountSink::run_on_main_thread`]), after the batches before it.
+    Run(MainThreadTask),
 }
 
 /// How long the main thread waits for the layout at a new window size
@@ -103,6 +108,10 @@ impl MountSink for Sink {
     fn resized(&self, size: Size<Points>) {
         self.send(Message::Resized(size));
     }
+
+    fn run_on_main_thread(&self, task: MainThreadTask) {
+        self.send(Message::Run(task));
+    }
 }
 
 /// Called on every frame with the frame's time (seconds) until it is done
@@ -162,6 +171,9 @@ pub(crate) struct Surface {
     pub(crate) file_drop: crate::file_drop::State,
     engine: RefCell<Option<Engine>>,
     control: RefCell<Option<EngineControl>>,
+    /// The URLs the app was launched with, for the next engine to start
+    /// ([`Surface::set_launch_links`]).
+    launch_links: RefCell<Vec<String>>,
     rx: RefCell<Option<Receiver<Message>>>,
     pending: RefCell<Arc<AtomicBool>>,
     /// The window drawn into (shared with the engine's sink).
@@ -176,6 +188,12 @@ pub(crate) struct Surface {
     pub(crate) target_scale: Cell<f32>,
     /// A paint is requested.
     invalid: Cell<bool>,
+    /// A frame is being drawn ([`Surface::paint`]).
+    painting: Cell<bool>,
+    /// A paint was requested while a frame was drawn: asked for again
+    /// once it is done (the request made inside `WM_PAINT` does not come
+    /// back as another `WM_PAINT`).
+    repaint: Cell<bool>,
     /// The next frame draws the whole window ([`Surface::invalidate`]).
     full_damage: Cell<bool>,
     /// The change stamp of the last request to draw the whole window
@@ -230,6 +248,9 @@ pub(crate) struct Surface {
     pub(crate) audio: crate::audio::Speaker,
     /// The disk cache of downloaded images ([`crate::image::set_disk_cache`]).
     pub(crate) image_cache: RefCell<Option<nsh_core::image::DiskCache>>,
+    /// The roots the app's `<Image>` files are read under
+    /// ([`nsh_engine::Engine::media_files`]).
+    pub(crate) media_files: RefCell<Arc<nsh_core::access::MediaFiles>>,
     /// Videos, web views and registered native components.
     pub(crate) native: crate::native::NativeState,
     /// The app's keyboard shortcuts ([`crate::keymap`]).
@@ -246,6 +267,12 @@ pub(crate) struct Surface {
     composed: RefCell<Vec<Rc<dyn Hosted>>>,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
     pub(crate) chrome: crate::chrome::Chrome,
+    /// A top-level window that has not shown yet: its first show paints it
+    /// before DWM composites it ([`crate::app::show_main`]).
+    pub(crate) main_unshown: Cell<bool>,
+    /// The mode the top-level window takes when it first shows (nsh.json
+    /// `window`, [`AppView::place_main_window`](crate::AppView)).
+    pub(crate) main_opening_mode: Cell<Option<nsh_core::desktop::WindowMode>>,
     /// Called after the surface is resized (development overlays).
     pub(crate) on_resized: RefCell<Vec<ResizeHandler>>,
     /// The engine missed the deadline of a resize ([`RESIZE_WAIT`]): later
@@ -279,6 +306,7 @@ impl Surface {
             file_drop: Default::default(),
             engine: RefCell::new(None),
             control: RefCell::new(None),
+            launch_links: RefCell::new(Vec::new()),
             rx: RefCell::new(None),
             pending: RefCell::new(Arc::new(AtomicBool::new(false))),
             hwnd: Arc::new(std::sync::atomic::AtomicIsize::new(0)),
@@ -288,6 +316,8 @@ impl Surface {
             fps: RefCell::new(None),
             target_scale: Cell::new(0.0),
             invalid: Cell::new(false),
+            painting: Cell::new(false),
+            repaint: Cell::new(false),
             // The first frame draws everything.
             full_damage: Cell::new(true),
             whole_change: Cell::new(0),
@@ -311,6 +341,7 @@ impl Surface {
             asset_base: RefCell::new(None),
             audio: Default::default(),
             image_cache: RefCell::new(None),
+            media_files: RefCell::default(),
             native: Default::default(),
             keymap: Default::default(),
             placed: RefCell::default(),
@@ -323,6 +354,8 @@ impl Surface {
             windows: RefCell::default(),
             input_root: RefCell::default(),
             chrome: Default::default(),
+            main_unshown: Cell::new(true),
+            main_opening_mode: Cell::new(None),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         let weak = Rc::downgrade(&surface);
@@ -335,12 +368,17 @@ impl Surface {
     }
 
     /// The GPU device shader views render with ([`crate::shader`]), opened
-    /// the first time one asks.
+    /// the first time one asks; without one the app hears that shader views
+    /// draw nothing (`shadersAvailable()`).
     pub(crate) fn shader_renderer(&self) -> Option<Rc<nsh_engine::shader::Renderer>> {
         self.shader_renderer
             .get_or_init(|| {
-                nsh_engine::shader::Renderer::new(nsh_engine::shader::PixelFormat::Bgra)
-                    .map(Rc::new)
+                let renderer =
+                    nsh_engine::shader::Renderer::new(nsh_engine::shader::PixelFormat::Bgra);
+                if renderer.is_none() {
+                    self.control(EngineControl::shaders_unavailable);
+                }
+                renderer.map(Rc::new)
             })
             .clone()
     }
@@ -405,7 +443,7 @@ impl Surface {
     }
 
     /// Measures the surface's frames and commits from now on; one
-    /// `nsh::perf` line a second ([`crate::fps`]). The ticker then runs on
+    /// `nsh::fps` line a second ([`crate::fps`]). The ticker then runs on
     /// every refresh.
     pub(crate) fn enable_fps(self: &Rc<Self>) {
         if self.fps.borrow().is_some() {
@@ -457,8 +495,11 @@ impl Surface {
         *self.rx.borrow_mut() = Some(rx);
         *self.pending.borrow_mut() = pending;
         let family = crate::text::ui_family();
-        // The embedding app's theme overrides are in the first frame.
+        // The embedding app's theme overrides are in the first frame, and
+        // the launch URL is the app's address when its code first runs
+        // (`UrlScheme.url()`).
         let tokens = self.host_tokens.borrow().clone();
+        let launch = self.launch_links.take();
         let setup = |control: &EngineControl| {
             if tokens.is_some() {
                 control.set_tokens(tokens);
@@ -466,11 +507,15 @@ impl Surface {
             if let Some(displays) = displays {
                 control.set_displays(displays);
             }
+            for url in launch {
+                crate::linking::dispatch(control, url);
+            }
         };
         match Engine::start_with(config, move || DWriteTextEngine::new(family), sink, setup) {
             Ok(engine) => {
                 // The app's downloaded images go through its disk cache.
                 crate::image::set_disk_cache(self, engine.image_cache());
+                *self.media_files.borrow_mut() = engine.media_files();
                 // The test moves its clock through the engine.
                 #[cfg(feature = "dev")]
                 if let Some(model) = &*self.test_model.borrow() {
@@ -513,8 +558,23 @@ impl Surface {
         }
     }
 
+    /// Sets the URLs the app was launched with (`EventKind::UrlScheme`: links
+    /// and files), which the next engine to start applies before the app's
+    /// code first runs.
+    pub(crate) fn set_launch_links(&self, urls: Vec<String>) {
+        *self.launch_links.borrow_mut() = urls;
+    }
+
     /// Sends an event to JS.
     pub(crate) fn event(&self, id: NodeId, kind: EventKind, payload: EventPayload) {
+        // A new activation cannot open a popup for an unanswered context
+        // request. Menu events include bar items, tray clicks and hotkeys.
+        if matches!(
+            kind,
+            EventKind::Menu | EventKind::Press | EventKind::AccessibilityAction
+        ) {
+            self.chrome.context_area.take();
+        }
         self.control(|c| c.dispatch_event(id, kind, payload));
     }
 
@@ -642,6 +702,10 @@ impl Surface {
     }
 
     fn request_paint(&self) {
+        if self.painting.get() {
+            self.repaint.set(true);
+            return;
+        }
         if !self.invalid.replace(true) {
             crate::window::invalidate(self.hwnd());
         }
@@ -691,10 +755,29 @@ impl Surface {
     /// Draws the window (`WM_PAINT`).
     pub(crate) fn paint(self: &Rc<Self>) {
         self.invalid.set(false);
+        self.painting.set(true);
         // Deferred: the swap chain posts `WM_NSH_PAINT` when it has room, so
         // `invalid` stays set (no second `WM_PAINT` meanwhile).
-        if crate::render::frame(self) {
+        let deferred = crate::render::frame(self);
+        self.painting.set(false);
+        if deferred {
             self.invalid.set(true);
+        } else if self.repaint.replace(false) {
+            // What changed while the frame was drawn (a text field's text
+            // services laying out as they draw) is drawn by the next one.
+            self.invalid.set(true);
+            let hwnd = self.hwnd();
+            if !hwnd.is_invalid() {
+                // SAFETY: a plain call on a window of this thread.
+                let _ = unsafe {
+                    windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                        Some(hwnd),
+                        crate::window::WM_NSH_PAINT,
+                        windows::Win32::Foundation::WPARAM(0),
+                        windows::Win32::Foundation::LPARAM(0),
+                    )
+                };
+            }
         }
     }
 
@@ -802,6 +885,7 @@ impl Surface {
                 }
             }
             Message::Resized(_) => self.resize_late.set(false),
+            Message::Run(task) => task.run(),
         }
         false
     }
@@ -814,6 +898,20 @@ impl Surface {
                 item,
                 MountItem::Animation(_) | MountItem::AnimationBindings { .. }
             ) {
+                // A window command can paint before the batch ends (sizing
+                // a window sends `WM_SIZE`, where it draws at once; showing
+                // one can paint it): the views take the animated values set
+                // so far first, or one entering with a motion is drawn as
+                // its style is, then at the motion's start, and flashes.
+                if matches!(
+                    item,
+                    MountItem::Command {
+                        command: Command::Desktop(_),
+                        ..
+                    }
+                ) {
+                    self.anim.borrow_mut().write(&self.mounter.borrow());
+                }
                 self.mounter.borrow_mut().apply(self, item);
             }
         }
@@ -1127,7 +1225,7 @@ mod tests {
 
     use nsh_core::Cursor;
     use windows::Win32::{
-        Foundation::{LPARAM, POINT, WPARAM},
+        Foundation::{LPARAM, LRESULT, POINT, WPARAM},
         Graphics::Gdi::ClientToScreen,
         UI::{
             Input::KeyboardAndMouse::{GetCapture, ReleaseCapture, SetCapture},
@@ -1306,5 +1404,172 @@ mod tests {
                 None => assert_eq!(info.flags.0 & CURSOR_SHOWING.0, 0, "cursor stayed visible"),
             }
         }
+    }
+
+    /// The opacity the animator has written into view `id`.
+    fn animated_opacity(surface: &Surface, id: NodeId) -> Option<f32> {
+        let view = surface.mounter.borrow().views.get(id).expect("the view");
+        view.state().anim.opacity
+    }
+
+    #[test]
+    fn window_commands_see_the_animated_values_set_before_them() {
+        use nsh_core::{
+            ViewKind,
+            animation::{AnimationOp, AnimationProp},
+            desktop::{DesktopCommand, WindowRequest},
+        };
+
+        let surface = Surface::new(Environment::default());
+        // What the core sends for a window that fits its content (with no
+        // window here, nothing is sized).
+        let fit = || MountItem::Command {
+            id: ROOT_ID,
+            command: Command::Desktop(Box::new(DesktopCommand::Request(
+                WindowRequest::SetContentSize {
+                    width: None,
+                    height: Some(Points(250.0)),
+                },
+            ))),
+        };
+        let set = |value| MountItem::Animation(AnimationOp::Set { node: 2, value });
+        // A view entering with a fade, a window command, then more of the
+        // batch: the command sees the value set before it.
+        surface.apply(&MountBatch {
+            items: vec![
+                MountItem::Animation(AnimationOp::CreateValue {
+                    node: 2,
+                    value: 0.25,
+                }),
+                MountItem::Create {
+                    id: 2,
+                    kind: ViewKind::View,
+                },
+                MountItem::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                MountItem::AnimationBindings {
+                    id: 2,
+                    bindings: vec![(AnimationProp::Opacity, 2)],
+                },
+                fit(),
+                set(0.75),
+            ],
+        });
+        assert_eq!(animated_opacity(&surface, 2), Some(0.25));
+        // A value bound before moves with no bindings sent again.
+        surface.apply(&MountBatch {
+            items: vec![set(0.5), fit()],
+        });
+        assert_eq!(animated_opacity(&surface, 2), Some(0.5));
+        // Without a window command, the values are written once the
+        // batches are applied, as before.
+        surface.apply(&MountBatch {
+            items: vec![set(1.0)],
+        });
+        assert_eq!(animated_opacity(&surface, 2), Some(0.5));
+        surface.write_animations();
+        assert_eq!(animated_opacity(&surface, 2), Some(1.0));
+    }
+
+    thread_local! {
+        /// The root a test window's `WM_SIZE` looks under, and the opacity
+        /// its view 2 had at each one ([`observe_sizes`]).
+        static SIZED: RefCell<(Option<NshView>, Vec<Option<f32>>)> =
+            const { RefCell::new((None, Vec::new())) };
+        /// The window procedure [`observe_sizes`] wraps.
+        static WRAPPED: Cell<isize> = const { Cell::new(0) };
+    }
+
+    /// Notes the opacity view 2 has when the window is sized, which the
+    /// window draws it with in `WM_SIZE`, then hands the message on.
+    unsafe extern "system" fn observe_sizes(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        if msg == WM_SIZE {
+            SIZED.with_borrow_mut(|(root, seen)| {
+                let view = root
+                    .as_ref()
+                    .and_then(|root| root.child_views().into_iter().find(|v| v.id() == 2));
+                seen.push(view.and_then(|v| v.state().anim.opacity));
+            });
+        }
+        // SAFETY: the window's own procedure, read from it before it was
+        // wrapped.
+        unsafe {
+            let wrapped = std::mem::transmute::<isize, WNDPROC>(WRAPPED.get());
+            CallWindowProcW(wrapped, hwnd, msg, wparam, lparam)
+        }
+    }
+
+    #[test]
+    fn a_window_command_draws_the_animated_values_set_before_it() {
+        use nsh_core::{
+            ViewKind,
+            animation::{AnimationOp, AnimationProp},
+            desktop::{DesktopCommand, WindowRequest},
+        };
+
+        let surface = Surface::new(Environment::default());
+        let hwnd =
+            crate::window::create(&surface, "NSH window command", (320, 240), None, false).unwrap();
+        SIZED.with_borrow_mut(|sized| *sized = (Some(surface.root.clone()), Vec::new()));
+        let observe: unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT =
+            observe_sizes;
+        // SAFETY: the test's own window, wrapped until it is destroyed.
+        unsafe {
+            WRAPPED.set(GetWindowLongPtrW(hwnd, GWLP_WNDPROC));
+            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, observe as usize as isize);
+        }
+        let fit = |height| MountItem::Command {
+            id: ROOT_ID,
+            command: Command::Desktop(Box::new(DesktopCommand::Request(
+                WindowRequest::SetContentSize {
+                    width: None,
+                    height: Some(Points(height)),
+                },
+            ))),
+        };
+        // Two commands that size the (hidden) window, which draws at once,
+        // with the value moved between them.
+        surface.apply(&MountBatch {
+            items: vec![
+                MountItem::Animation(AnimationOp::CreateValue {
+                    node: 2,
+                    value: 0.25,
+                }),
+                MountItem::Create {
+                    id: 2,
+                    kind: ViewKind::View,
+                },
+                MountItem::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                MountItem::AnimationBindings {
+                    id: 2,
+                    bindings: vec![(AnimationProp::Opacity, 2)],
+                },
+                fit(250.0),
+                MountItem::Animation(AnimationOp::Set {
+                    node: 2,
+                    value: 0.75,
+                }),
+                fit(300.0),
+            ],
+        });
+        let seen = SIZED.with_borrow_mut(|(root, seen)| {
+            *root = None;
+            std::mem::take(seen)
+        });
+        // SAFETY: the test's own window.
+        let _ = unsafe { DestroyWindow(hwnd) };
+        assert_eq!(seen, [Some(0.25), Some(0.75)]);
     }
 }

@@ -481,6 +481,15 @@ pub(crate) fn background(surface: &Surface, id: NodeId) -> Color {
     }
 }
 
+/// Fills the redirection surface of window `hwnd` (root `id`) with its
+/// background, unless it is see-through.
+fn fill_background(surface: &Surface, id: NodeId, hwnd: HWND) {
+    let color = background(surface, id);
+    if color.0 & 0xff != 0 {
+        crate::window::fill(hwnd, color);
+    }
+}
+
 /// The window's client area was resized or moved to another scale: the
 /// root view takes its size, which the core lays the root out at.
 fn resized(surface: &Surface, window: &AppWindow) {
@@ -750,7 +759,12 @@ pub(crate) fn handle(
         }
         WM_ERASEBKGND => Some(Some(LRESULT(1))),
         WM_SIZE => {
+            // The frame's material follows the zoom state.
+            crate::shell::zoom_changed(hwnd);
             if let Some(window) = &window {
+                // What DWM shows past the last frame meanwhile, as the main
+                // window's.
+                fill_background(surface, id, hwnd);
                 resized(surface, window);
                 // Drawn now, so that it never shows stretched or stale
                 // pixels while it is resized.

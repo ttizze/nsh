@@ -58,6 +58,10 @@ pub struct TerminalCapabilities {
     /// keyboard protocol. Without it, Ctrl stands in for Cmd in the app's
     /// shortcuts on macOS.
     pub command_key: bool,
+    /// The terminal takes OSC 8 hyperlinks: the text inside a `Link` is
+    /// drawn as a hyperlink to its `href`. Without it, as on the Linux
+    /// console, which shows the sequence, links are plain text.
+    pub hyperlinks: bool,
 }
 
 /// The colors a terminal shows.
@@ -84,6 +88,7 @@ impl Default for TerminalCapabilities {
             background_color: None,
             foreground_color: None,
             command_key: false,
+            hyperlinks: true,
         }
     }
 }
@@ -568,6 +573,20 @@ impl AppView {
 
     /// Routes input against the last completed render. Unused keys and outside-area events are ignored.
     pub fn handle(&mut self, input: Input) -> Handled {
+        // What the user gives input with, before it acts: the focus it
+        // moves shows or not (`focus-visible:`).
+        let modality = match &input {
+            Input::Mouse(mouse) if matches!(mouse.kind, crate::MouseKind::Down(_)) => {
+                Some(nsh_core::platform::InputModality::Pointer)
+            }
+            Input::Key { release: false, .. } | Input::KeyRepeat { .. } => {
+                Some(nsh_core::platform::InputModality::Keyboard)
+            }
+            _ => None,
+        };
+        if let (Some(modality), Some(engine)) = (modality, &self.surface.engine) {
+            engine.control().set_input_modality(modality);
+        }
         // Ctrl+C is never the diagnostics panel's: it copies or quits.
         #[cfg(feature = "dev")]
         let interrupt = matches!(&input, Input::Key { key, modifiers, .. }
@@ -1448,6 +1467,7 @@ impl AppView {
                 Message::Frame => self.surface.request_frame(),
                 Message::Resized(size) => self.surface.laid_out = size,
                 Message::Focused(moved) => self.keyboard.caught_up(moved),
+                Message::Run(task) => task.run(),
                 #[cfg(feature = "dev")]
                 Message::Reload => {
                     if let Some(mut dev) = self.dev.take() {
@@ -1665,6 +1685,13 @@ impl AppView {
             perf.pending.draw = drawing.elapsed();
             perf.draw(area, buffer);
         }
+        let painted = if self.options.capabilities.hyperlinks {
+            &self.tree.links
+        } else {
+            &crate::link::Painted::new()
+        };
+        let links = crate::link::finish(buffer, painted, &self.output.links.borrow());
+        *self.output.links.borrow_mut() = links;
         #[cfg(feature = "dev")]
         {
             let requests: Vec<_> = self

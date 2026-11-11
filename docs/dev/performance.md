@@ -4,6 +4,78 @@ Performance is the project's first priority; the rules are in `AGENTS.md`. Chang
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
 (Apple Silicon except where noted):
 
+Retained RichEditor rows (2026-11-08 audit, Linux x86_64, against `058a745a`; dev/test profile with
+`nsh-core` and `nsh-base` at `opt-level=3`, `ApproxTextEngine`). Editing the visible first paragraph with content
+culling enabled, 80 ASCII characters per paragraph, both Core order checks applied together:
+
+| Paragraphs | Before (ms/edit) | After (ms/edit) |
+|---|---|---|
+| 1,000 | 7.56 | 6.16 |
+| 5,000 | 88.18 | 52.39 |
+| 10,000 | 315.43 | 128.07 |
+
+Four warmup edits precede alternating single-character insertions and deletions. These are medians of process
+means: seven alternating rounds of 32 measured edits for 1,000 paragraphs, three rounds of four for the larger
+sizes. Every measured edit emits one Text and zero Create, Delete or Frame items. Timing covers session dispatch,
+controller synchronization, reactive updates and Core commit/settling; setup, QuickJS and native text shaping,
+mounting and drawing are excluded. The two checks were measured as one variant. RichEditor's own block walk and
+other document-wide work remain, so these measurements describe the saved matching and placement work rather than
+linear complete-editor updates.
+
+Follow-up `nsh test examples/bench/RichEditor.tsx --trace` against `41100f2b` (2026-11-09, Linux x86_64,
+Ryzen 9 7950X, pinned to CPU 0, the same package optimization settings): three alternating runs, four warmup edits
+then four measured edits per run. The median of each run's mean commit time is **15.00 → 9.91 ms** for 1,000
+paragraphs. Every edit's complete mount batch matches between versions; measured commits keep 0 ops / 4 items /
+4,011 nodes (one Text and three selection Frames, zero Create, Delete, Insert or Remove). Initial counts stay at
+19 ops / 9,048 items / 4,011 nodes. This JS-driven headless control keeps content culling disabled and measures the
+commit log, excluding the controller work outside the commit and native input, shaping, mounting and drawing.
+It is separate from the Rust audit above.
+
+The counter control (`echo 'await app.press("+1")' | nsh test examples/counter/App.tsx --trace`, one run per
+version) keeps 56 ops / 50 items / 21 nodes initially and 10 ops / 7 items / 24 nodes after the press. Commit times
+are 335 / 219 → 290 / 213 µs, a smoke check of unchanged work rather than a benchmark.
+
+Markdown TeX preprocessing (`text_view/markdown/latex.rs`, 2026-11-08, Linux x86_64,
+release, against `3b4f2abf`): a paragraph of
+``"`a` x ".repeat(k) + "\\(x^2\\)"``, math enabled, streaming off. Eleven alternating
+before / after rounds on one CPU, warmed and batched; medians, input construction excluded:
+
+| Code spans | `latex::inline`, before → after | Complete Markdown parse, before → after |
+|---|---|---|
+| 1,000 | 0.853 → 0.00891 ms | 1.548 → 0.795 ms |
+| 5,000 | 24.366 → 0.0450 ms | 27.794 → 4.444 ms |
+| 10,000 | 96.966 → 0.0914 ms | 100.688 → 8.911 ms |
+
+The ordered code spans are consumed with a cursor instead of searched from the start at
+each byte. With streaming repair enabled, the complete 10,000-span parse takes
+544.17 → 453.83 ms; other scans still contribute. A 35,200-byte control of 200 short
+paragraphs takes 74.45 → 79.69 µs in TeX rewriting (about 5 µs more), while its complete
+parse stays around 5.2 ms. Short Markdown and code spans without TeX delimiters have
+unchanged complete-parse timings. These parser measurements exclude layout and drawing.
+
+Headless `nsh test <entry> --trace` (debug, against `bba76ef7`, three fresh processes per
+version, the same paragraphs in a mounted `TextView`): first-commit medians for 1,000 /
+10,000 spans are 51.121 / 2731.507 → 43.521 / 1905.226 ms. Both versions send 7 ops /
+16 mount items, with 3,007 / 30,007 nodes respectively. The counter control keeps
+56 ops / 50 items / 21 nodes initially and 10 ops / 7 items / 24 nodes after `+1`;
+commit medians 497 / 379 → 500 / 310 µs, noisy samples establishing stable work counts.
+
+Terminal `TextView` tables (2026-11-08, Linux x86_64, debug hosts,
+`nsh test <entry> --target tui --trace`, against `71aeb06a`, seven alternating runs per version, medians):
+100 body rows × 10 columns, each cell 100 `x` characters, in a 200 × 60 Cell terminal. Narrowing the table's
+container from 200 to 120 Cells commits in 616.6 → 267.1 ms; its initial commit takes 964.8 → 647.5 ms.
+Both versions send 33 / 2 ops and 12,995 / 5,267 mount items initially / on narrowing, with 5,376 nodes.
+A 10 × 6 table (40 characters per cell, narrowed to 100 Cells) takes 45.6 → 44.5 ms initially and
+25.9 → 22.7 ms on narrowing, keeping 869 / 379 items and 386 nodes. Commit times include component expansion,
+text measurement and layout; terminal drawing and input latency are outside the samples.
+
+The table shares one `computed` of its column widths (`text_view/view.rs`), borrowed by its cells and rules
+through `Memo::with`: the same fitting algorithm runs once per width change, down from 1,013 times for
+the 100 × 10 table. Its reactive graph and fitting kernel alone (`rustc -C opt-level=3`, same machine,
+seven alternating runs, width from zero to 120 Cells) take 8.636 → 0.0535 ms, excluding construction,
+text measurement, layout and drawing. All 49 paired terminal cell dumps match through consecutive widths,
+repeated widths, column floors and `colspan`; hiding and remounting the tables passes on both hosts.
+
 Live resize of a real app (Noop, 10 065 nodes, a horizontal corner drag of 6 s, release, `--target macos` package, no
 sampler): window sizes per second 12 → 62-65, gap between sizes p50 86 → 16 ms and p95 about 25 ms, the window's lag
 behind the pointer p50 20 → 3-4 pt. An empty page and TextEdit both do about 87 sizes per second on this machine. Text
@@ -269,6 +341,37 @@ sends 2631 mount items instead of 2885 (no `ViewProps` set and set back in one c
   median ~5µs vs ~14µs in JS, commit ~15µs vs ~22µs. Scrolling a 1000-row `List` (avatar, two texts, a bound color)
   6000 pt: ~77µs vs ~150µs of JS per rebinding frame, commit ~205µs vs ~276µs.
 
+## Views made over frames (all platforms)
+
+A list row bound in the overscan, or a long reply staged into a chat, used to make its whole subtree in one batch:
+hundreds of native views nobody sees yet, created and committed by the platform in one frame (423 views took one 87 ms
+frame on macOS, mostly the Core Animation commit). The core now spreads them (`crates/nsh-core/src/core/pace.rs`):
+
+- once a turn has made 64 views, a view about to be made in a scroll view or a list cell waits, culled as content culling
+  holds views back (laid out, given a frame, made at once by a command for it);
+- after each layout the waiting views that show (their frame meets the viewport of every scroll view and list around
+  them) are made at once, down to their leaves; the rest come in later turns, nearest the viewport first, at most 32
+  views or 4 ms a turn, and the engine asks for a display frame while some wait;
+- content culling's overscan keeps the same budget.
+
+Views not made yet are not in the platform's accessibility tree, as culled content is not: they are out of sight and
+come within a few frames. Selection and select-all read the core's nodes, not native views. Test drivers turn content
+culling off, which turns pacing off, so their steps reach every view. Nothing waits that may show away from its frame
+(sticky, followers, overlays, screens, modals, transformed or animated views), nor anything outside scroll views and
+lists.
+
+Reproduce: `cargo test -p nsh-core --release --lib -- --ignored big_rows_bench --nocapture` (a 480 pt list of rows of
+420 views each, 5 rows bound). Linux x64, release:
+
+| | first batch | later batches | batches |
+|---|---|---|---|
+| before | 2,105 views (4,640 items), core 1.04 ms | none | 1 |
+| after | 100 views (290 items), core 1.02 ms | 32 views each (96 items), core < 25 us | 64 |
+
+Every view in sight is in the first batch in both. The platform's cost is per view made, so at the macOS figure of
+about 0.2 ms a view the first frame goes from about 420 ms of platform work to about 20 ms, and each later one about
+6 ms.
+
 ## Shader pictures on Linux
 
 What the GTK backend reads back for shaders' pictures (`nsh-platform-linux` `shader.rs`, `docs/dev/shaders.md`), and
@@ -343,9 +446,14 @@ readback) is not this implementation. Linux `backdropFilter` remains unsupported
 Headless Chromium over CDP, a published package (`nsh package --target web`), 2026-10-28:
 
 - A call from app code into the runtime (a signal read or set, an element made) outside a Wasm entry costs ~1µs
-  however many values the app holds: the weak tracing runs at most every 100ms after the call
-  (`values.js` `schedule`), not inside it. With a full trace per call it cost ~0.11ms at 1 700 retained values and
-  ~1.2ms at 14 400 (a chat of 165 messages of 20 signals each), and a message pushed every second froze the page.
+  however many values the app holds: the weak tracing runs after the call, not inside it, at least 100ms apart
+  and twenty times as long after a run as it took (`values.js` `schedule`, `collectDelay`). With a full trace per
+  call it cost ~0.11ms at 1 700 retained values and ~1.2ms at 14 400 (a chat of 165 messages of 20 signals each),
+  and a message pushed every second froze the page.
+- Typing into a controlled `Input` beside 10 000 rows that each hold a handler, a key every 80ms, 2026-11-11: with
+  accessors keyed by numbers and the accounting spaced by its own cost, the accounting took ~3.65ms per key instead
+  of ~9.4ms and script ~5.4ms instead of ~10.7ms; with the CPU slowed 4×, accounting ~3.6ms instead of ~50.4ms,
+  script ~6.9ms instead of ~65ms, main-thread task time ~20.9ms instead of ~79.5ms per key.
 - The gallery's DataTable demo, quotes ticking every 33ms and no scroll, 10s: the rows are read a row per call
   (`JsHost::primitives`, op 49), ~220 000 value calls in 3s instead of ~8.7 million (a cell took five), script
   ~2.65s instead of ~3.86s, main thread ~4.7s instead of ~5.95s, garbage collection ~52ms instead of ~162ms.
@@ -526,7 +634,7 @@ draw a panel.
   on the main thread (18 ms of every frame: ~190 new drawings a second). After: no cap in NSH's windows, canvases
   rasterized on two workers and only what animates in place (`canvas.rs`).
 
-The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so debug timings are meaningful too; release uses fat LTO.
+The dev profile builds `quickjs-jit-sys` and `taffy` with `opt-level = 3`, so debug timings are meaningful too; release uses fat LTO (the published distribution thin LTO over 16 codegen units: `docs/dev/tooling.md` "Releases").
 
 - Linux (GTK 4, release; a 1896×1030 window on a 120 Hz headless Hyprland output, NVIDIA; `--fps` readings and the
   host's threads' CPU from `/proc`, 20 s runs). Before = main as of `8ff7b9f6` (GSK's Vulkan renderer, canvases
@@ -681,3 +789,27 @@ immediately before launching the TUI host. A private-PTY Gallery run with the ch
 at 52 ms, build completion before alternate-screen entry, and Gallery content at 5.436 s (including host
 recompilation). This verifies feedback during a build, not a startup speedup. The CLI integration test
 checks startup output and host-diagnostic isolation in ordinary and verbose modes.
+
+## macOS consecutive child appends
+
+Measured on an Apple silicon Mac on 2026-11-09, debug, baseline `36b91689c` versus the
+foreign-subview scan fast path. Three runs per size, medians, same Background priority:
+
+| Children | Before wall / CPU (ms) | After wall / CPU (ms) | Wall speedup |
+| --- | --- | --- | --- |
+| 100 | 41.071 / 40.526 | 12.591 / 12.596 | 3.3x |
+| 1,000 | 3031.449 / 2985.785 | 128.552 / 128.141 | 23.6x |
+| 8,600 | 215400.935 / 213106.725 | 1142.230 / 1129.177 | 188.6x |
+
+The isolated harness precreates a plain parent and children, then times repeated
+`NshView::insert_before(parent, None)` calls on a detached AppKit hierarchy and checks the final
+child count. CPU is process user + system time, not utilization. Creation, engine work, layout
+and drawing are excluded. Containers with hosted views or identifier-tagged backdrops retain
+the conservative scan. This removes redundant sibling scans; it does not establish that all
+AppKit mounting work is linear.
+
+The separate `NSH_MOUNT_BENCH_ONLY=1` native integration workload measures initial load to the
+native hierarchy. At 8,600 rows it showed no improvement: release 3903.0 → 3960.3 ms, debug
+18103.7 → 17985.3 ms (three-run medians). Most initial insertions specify a sibling and do not
+use the append path. These are not first-paint timings. GPU/power and engine trace item counts
+were not measured; interactive-priority execution was unavailable in this session.
