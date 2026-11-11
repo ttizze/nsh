@@ -23524,7 +23524,9 @@ mod rust_menus {
         desktop::{DesktopCommand, MenuItem as Item, MenuLabels, MenuRole},
         element::{
             Root,
-            desktop::{MenuItem, current_window, popup_menu_at, set_application_menu, set_menu_labels},
+            desktop::{
+                MenuItem, current_window, popup_menu_at, set_application_menu, set_menu_labels,
+            },
         },
         keymap::Modifiers,
         platform::Os,

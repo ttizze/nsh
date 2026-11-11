@@ -42,7 +42,8 @@ use std::{
 use nsh_core::{
     Color, EventKind, EventPayload, ImageSource, PayloadValue, ROOT_ID,
     desktop::{
-        DesktopCommand, Key, MenuAction, MenuItem, MenuLabels, MenuRole, Shortcut, WindowRequest, menu_icon,
+        DesktopCommand, Key, MenuAction, MenuItem, MenuLabels, MenuRole, Shortcut, WindowRequest,
+        menu_icon,
     },
     geometry::{Edges, Points},
 };
@@ -1391,9 +1392,16 @@ fn show_menu_bar(surface: &Surface) {
     // destroyed once the window no longer shows it, then its bitmaps freed.
     unsafe {
         let bar = match &shown {
-            Some(items) => CreateMenu()
-                .ok()
-                .inspect(|bar| append(*bar, items, &c.labels.borrow(), &mut entries, &mut icons, false)),
+            Some(items) => CreateMenu().ok().inspect(|bar| {
+                append(
+                    *bar,
+                    items,
+                    &c.labels.borrow(),
+                    &mut entries,
+                    &mut icons,
+                    false,
+                )
+            }),
             None => None,
         };
         theme_menus(crate::system::dark(surface));
@@ -1505,7 +1513,14 @@ pub(crate) fn show_popup(surface: &Rc<Surface>) {
     // SAFETY: a menu made, tracked and destroyed on this thread.
     let chosen = unsafe {
         let Ok(menu) = CreatePopupMenu() else { return };
-        append(menu, &items, &surface.chrome.labels.borrow(), &mut entries, &mut icons, true);
+        append(
+            menu,
+            &items,
+            &surface.chrome.labels.borrow(),
+            &mut entries,
+            &mut icons,
+            true,
+        );
         // What loaded in time is in memory, on the items now; what did not
         // goes on them while the menu is open.
         let loads = load_icons(surface, icons, &bitmaps);
@@ -1927,7 +1942,6 @@ mod tests {
         assert_eq!(selection(&text), None);
     }
 
-
     /// An item with a role and no label of its own reads the app's label
     /// of the role, else the English one, its shortcut after a tab.
     #[test]
@@ -1940,6 +1954,7 @@ mod tests {
             checked: None,
             role: Some(MenuRole::Copy),
             when: nsh_core::keymap::When::Always,
+            icon: None,
         };
         let text = |labels: &MenuLabels| String::from_utf16(&item_text(&action, labels)).unwrap();
         assert_eq!(text(&MenuLabels::default()), "Copy\tCtrl+C\0");

@@ -10,7 +10,9 @@ use std::{
 };
 
 use nsh_core::{
-    desktop::{MenuLabels, Backdrop, MainWindowOptions, WindowMode, WindowPlacement, WindowPosition},
+    desktop::{
+        Backdrop, MainWindowOptions, MenuLabels, WindowMode, WindowPlacement, WindowPosition,
+    },
     geometry::{Size, px},
     platform::{Appearance, Locale},
 };

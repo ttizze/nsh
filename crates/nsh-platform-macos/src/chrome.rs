@@ -1323,6 +1323,7 @@ mod tests {
             checked: None,
             role: Some(MenuRole::Copy),
             when: nsh_core::keymap::When::Always,
+            icon: None,
         };
         assert_eq!(title(&action), "コピー");
         set_menu_labels(MenuLabels::default());

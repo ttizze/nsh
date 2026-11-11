@@ -20,8 +20,7 @@ use objc2::{
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
     NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSEvent, NSEventModifierFlags,
-    NSEventType, NSScreen, NSView, NSWindow, NSWindowDelegate,
-    NSWindowStyleMask,
+    NSEventType, NSScreen, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{
     NSArray, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL,

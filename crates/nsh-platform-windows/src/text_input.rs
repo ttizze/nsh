@@ -1710,14 +1710,13 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
             }
         })
     };
-    let item = |role: Option<MenuRole>, label: &str, enabled: bool, action: Action| {
-        LocalItem::Item {
+    let item =
+        |role: Option<MenuRole>, label: &str, enabled: bool, action: Action| LocalItem::Item {
             role,
             label: label.to_owned(),
             enabled,
             action,
-        }
-    };
+        };
     crate::chrome::popup_actions(
         surface,
         vec![
@@ -1751,7 +1750,7 @@ pub(crate) fn context_menu(surface: &Rc<Surface>, view: &NshView) {
             ),
             item(
                 None,
-                "Delete",
+                delete.as_deref().unwrap_or("Delete"),
                 editable && selected,
                 command(WM_CLEAR, 0, 0),
             ),

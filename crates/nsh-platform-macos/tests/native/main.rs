@@ -12,11 +12,13 @@
 //! ```sh
 //! NSH_MOUNT_BENCH_ONLY=1 cargo test --release -p nsh-platform-macos --test native -- --ignored
 //! ```
-#[cfg(target_os = "macos")]
-mod ime;
 mod embedded_scroll;
 #[cfg(target_os = "macos")]
+mod ime;
+#[cfg(target_os = "macos")]
 mod input_hidden;
+#[cfg(target_os = "macos")]
+mod menu_labels;
 #[cfg(target_os = "macos")]
 mod mount;
 #[cfg(target_os = "macos")]
@@ -31,8 +33,6 @@ mod window_frames;
 mod window_hover;
 #[cfg(target_os = "macos")]
 mod window_press;
-#[cfg(target_os = "macos")]
-mod menu_labels;
 fn main() {
     if !std::env::args().any(|arg| arg == "--ignored") {
         println!("Native AppKit checks skipped; run with --ignored in a desktop session.");

@@ -1417,9 +1417,8 @@ impl ListState {
             // Measurements can leave the end unchanged or contracted while
             // moving the visible rows. Pure user scrolls and native overscroll
             // at either edge keep their positions.
-            let settle = distance >= 0.0
-                && self.offset - kept >= 0.0
-                && (end != was || kept != 0.0);
+            let settle =
+                distance >= 0.0 && self.offset - kept >= 0.0 && (end != was || kept != 0.0);
             if !opening && (was.is_nan() || distance > threshold || (end <= was && !settle)) {
                 return 0.0;
             }
