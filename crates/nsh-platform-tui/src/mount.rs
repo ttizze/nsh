@@ -491,6 +491,7 @@ impl Mounter {
                     nsh_core::desktop::DesktopCommand::PopupMenu { .. }
                         | nsh_core::desktop::DesktopCommand::SetMenu(_)
                         | nsh_core::desktop::DesktopCommand::SetMenuBar(_)
+                        | nsh_core::desktop::DesktopCommand::SetMenuLabels(_)
                 ) =>
                 {
                     match &**desktop {
@@ -503,6 +504,8 @@ impl Mounter {
                         nsh_core::desktop::DesktopCommand::SetMenuBar(mode) => {
                             self.menus.set_menu_bar(*mode);
                         }
+                        // Labels belong to the macOS and Windows native hosts.
+                        nsh_core::desktop::DesktopCommand::SetMenuLabels(_) => {}
                         _ => {}
                     }
                 }

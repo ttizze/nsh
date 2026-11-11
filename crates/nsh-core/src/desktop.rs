@@ -666,7 +666,8 @@ impl MenuRole {
 /// the standard menu bar a standalone app opens with on macOS (`run_app`'s:
 /// the app menu, Edit and Window), the edit menus of text fields and
 /// selectable text where NSH shows its own (Windows), and the items with a
-/// role and no label of their own. English ([`MenuRole::label`]) for what
+/// role and no label of their own in the macOS and Windows native hosts.
+/// English ([`MenuRole::label`]) for what
 /// the app does not label.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]

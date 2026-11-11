@@ -1203,7 +1203,8 @@ fn desktop_os() -> bool {
     super::os().is_desktop()
 }
 
-/// Labels the menus NSH makes in the app's language, in place of the
+/// Labels the macOS and Windows native hosts' menus in the app's language,
+/// in place of the
 /// labels the app opened with (the host's `AppOptions::menu_labels`): the
 /// standard menu bar on macOS, the edit menus of text fields and selectable
 /// text on Windows, and the items with a role and no label of their own in
