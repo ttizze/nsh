@@ -149,7 +149,7 @@ final class InputBox extends FrameLayout implements Node {
                     android.content.ClipboardManager board = (android.content.ClipboardManager)
                             getContext().getSystemService(Context.CLIPBOARD_SERVICE);
                     android.content.ClipData clip = board == null ? null : board.getPrimaryClip();
-                    if (clip != null && pasted(clip) && !inserts(clip)) return true;
+                    if (clip != null && (pasted(clip) || pasteBehavior == 2) && !inserts(clip)) return true;
                 }
                 return super.onTextContextMenuItem(item);
             }
