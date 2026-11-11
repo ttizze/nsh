@@ -1385,9 +1385,9 @@ impl ListState {
     /// returns how far to scroll after content or viewport changes (and
     /// starts at the end). Bottom-aligned lists start at the end too, and
     /// like other lists with `follow_end` stay at the end
-    /// when the end moves away while they are within the threshold of it
-    /// (a growing last item, a shrinking viewport); scrolled further up,
-    /// they keep what is visible (content grows below it).
+    /// while content and viewport sizes change and they are within the
+    /// threshold of it; scrolled further up, they keep what is visible
+    /// (content grows below it).
     ///
     /// `kept` is how far this commit's measurements moved the offset to keep
     /// the visible rows in place: that move says nothing about where the user
@@ -1417,11 +1417,13 @@ impl ListState {
             let opening = bottom && was.is_nan();
             let distance = was - (self.offset - kept);
             // Rows above the viewport shrinking while visible ones grow can
-            // leave the end where it was and the offset short of it.
-            // A negative distance is native overscroll, not a row falling
-            // short of the end. Let the platform finish its drag and bounce
+            // leave the end unchanged or contracted, and the offset short of it.
+            // Native overscroll at either edge is not a row falling short
+            // of the end. Let the platform finish its drag and bounce
             // instead of sending a competing ScrollBy on every report.
-            let settle = bottom && (0.0..=PIN_SLACK).contains(&distance);
+            let settle = distance >= 0.0
+                && self.offset - kept >= 0.0
+                && (end != was || kept != 0.0 || (bottom && distance <= PIN_SLACK));
             if !opening && (was.is_nan() || distance > threshold || (end <= was && !settle)) {
                 return 0.0;
             }
@@ -2368,6 +2370,75 @@ mod tests {
         m.offset = 5000.0 - 400.0;
         m.measured(99, 80.0);
         assert_eq!(m.anchor_end(0.0), 0.0);
+    }
+
+    #[test]
+    fn following_the_end_survives_rows_shrinking_above_a_growing_last_row() {
+        for (height, end) in [(70.0, 1490.0), (80.0, 1500.0)] {
+            for gap in [0.0, 5.0, 11.0] {
+                let mut l = list(40, 50.0, 500.0);
+                l.set_follow_end(Some(10.0));
+                l.anchor_end(0.0);
+                l.reported(1500.0 - gap, 0);
+                let kept = l.measured(0, 20.0);
+                assert_eq!(kept, -30.0);
+                assert_eq!(l.measured(39, height), 0.0);
+                l.offset += kept;
+                let correction = l.anchor_end(kept);
+                if gap <= 10.0 {
+                    assert_eq!(l.offset, end);
+                    assert_eq!(kept + correction, end - 1500.0 + gap);
+                } else {
+                    assert_eq!(correction, 0.0);
+                    assert_eq!(l.offset, 1459.0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_followed_end_contracts_with_visible_content_or_a_larger_viewport() {
+        for (height, viewport) in [(30.0, 500.0), (50.0, 520.0)] {
+            let mut l = list(40, 50.0, 500.0);
+            l.set_follow_end(Some(10.0));
+            l.anchor_end(0.0);
+            l.reported(1500.0, 0);
+            assert_eq!(l.measured(39, height), 0.0);
+            l.viewport = viewport;
+            assert_eq!(l.anchor_end(0.0), -20.0);
+            assert_eq!(l.offset, 1480.0);
+        }
+    }
+
+    #[test]
+    fn contracting_content_preserves_native_overscroll_at_either_edge() {
+        for (count, size, offset, last) in [(40, 50.0, 1510.0, 40.0), (10, 53.0, -20.0, 43.0)] {
+            let mut l = list(count, size, 500.0);
+            l.set_follow_end(Some(80.0));
+            l.anchor_end(0.0);
+            l.reported(offset, 0);
+            assert_eq!(l.measured(count - 1, last), 0.0);
+            assert_eq!(l.anchor_end(0.0), 0.0);
+            assert_eq!(l.offset, offset);
+        }
+    }
+
+    #[test]
+    fn scrolling_up_within_the_follow_threshold_keeps_the_readers_position() {
+        for alignment in [ListAlignment::Top, ListAlignment::Bottom] {
+            let mut l = list(40, 50.0, 500.0);
+            l.set_alignment(alignment);
+            l.set_follow_end(Some(80.0));
+            for i in 0..40 {
+                l.measured(i, 50.0);
+            }
+            l.anchor_end(0.0);
+            l.reported(1500.0, 0);
+            l.anchor_end(0.0);
+            l.reported(1495.0, 0);
+            assert_eq!(l.anchor_end(0.0), 0.0);
+            assert_eq!(l.offset, 1495.0);
+        }
     }
 
     #[test]

@@ -1,6 +1,6 @@
 // A case of the API's test suite (docs/dev/compatibility.md): lists that
 // follow their content: one at its end stays at the end as an item is
-// added below, and one reports the items that count as viewable by its
+// added below or the last row collapses, and one reports the items that count as viewable by its
 // threshold (fully visible ones only). Its script
 // checks each.
 import { Text, View, signal } from "nsh";
@@ -10,11 +10,15 @@ const range = (n: number) => Array.from({ length: n }, (_, i) => i);
 
 function App() {
   const items = signal(range(10));
+  const collapsed = signal(false);
   const viewable = signal("none");
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
       <View testID="add" onPress={() => items.set(range(items().length + 1))}>
         <Text>Add</Text>
+      </View>
+      <View testID="collapse-last" onPress={() => collapsed.set(true)}>
+        <Text>Collapse last row</Text>
       </View>
       <List
         each={items()}
@@ -23,7 +27,7 @@ function App() {
         style={{ height: 200 }}
       >
         {(item) => (
-          <View style={{ height: 40 }}>
+          <View style={{ height: collapsed() && item() === items().length - 1 ? 20 : 40 }}>
             <Text>Feed {item()}</Text>
           </View>
         )}
