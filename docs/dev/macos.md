@@ -158,7 +158,9 @@ any layout; the dev host's Cmd+R is a local key monitor (`dev.rs`).
 
 - **In a field** (`text_input.rs`), AppKit's key bindings edit: Option / Cmd + arrows, their Shift variants,
   Option+Delete, Cmd+Delete, Ctrl+A / E / K, undo and the Edit menu's commands (a secure field refuses Copy and
-  Cut). Changes pass `Ctx::should_change` (one `onKeyPress` per insertion or deletion, `maxLength` clipping, line
+  Cut). With no selection in the input, Copy takes the surface's selected text (`copy_falls_through`) while
+  keeping the input focused; an input's own selection takes priority. Changes pass `Ctx::should_change` (one
+  `onKeyPress` per insertion or deletion, `maxLength` clipping, line
   breaks of a single line become spaces: its cell is not in single-line mode, which would replace them in a second
   edit). The delegates' `doCommandBySelector:` (`Ctx::command`) takes return (`insertNewline:`, as
   `InputConfig::submit()` says; Shift+Return breaks the line of a multiline input that submits, and a return with
