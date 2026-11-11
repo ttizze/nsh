@@ -1418,11 +1418,12 @@ impl ListState {
             let distance = was - (self.offset - kept);
             // Rows above the viewport shrinking while visible ones grow can
             // leave the end unchanged or contracted, and the offset short of it.
-            // Native overscroll at either edge is not a row falling short
-            // of the end. Let the platform finish its drag and bounce
+            // Allow pixel rounding at either edge. Beyond that, native
+            // overscroll is not a row falling short of the end. Let the
+            // platform finish its drag and bounce
             // instead of sending a competing ScrollBy on every report.
-            let settle = distance >= 0.0
-                && self.offset - kept >= 0.0
+            let settle = distance >= -PIN_SLACK
+                && self.offset - kept >= -PIN_SLACK
                 && (end != was || kept != 0.0 || (bottom && distance <= PIN_SLACK));
             if !opening && (was.is_nan() || distance > threshold || (end <= was && !settle)) {
                 return 0.0;
@@ -2375,7 +2376,7 @@ mod tests {
     #[test]
     fn following_the_end_survives_rows_shrinking_above_a_growing_last_row() {
         for (height, end) in [(70.0, 1490.0), (80.0, 1500.0)] {
-            for gap in [0.0, 5.0, 11.0] {
+            for gap in [-0.25, 0.0, 5.0, 11.0] {
                 let mut l = list(40, 50.0, 500.0);
                 l.set_follow_end(Some(10.0));
                 l.anchor_end(0.0);
@@ -2408,6 +2409,17 @@ mod tests {
             assert_eq!(l.anchor_end(0.0), -20.0);
             assert_eq!(l.offset, 1480.0);
         }
+    }
+
+    #[test]
+    fn pixel_rounding_at_the_start_does_not_drop_following() {
+        let mut l = list(10, 53.0, 500.0);
+        l.set_follow_end(Some(80.0));
+        l.anchor_end(0.0);
+        l.reported(-0.25, 0);
+        assert_eq!(l.measured(9, 43.0), 0.0);
+        assert_eq!(l.anchor_end(0.0), 20.25);
+        assert_eq!(l.offset, 20.0);
     }
 
     #[test]
