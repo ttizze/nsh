@@ -50,6 +50,8 @@ fn main() {
                 window_frames::run();
             } else if std::env::var_os("NSH_INPUT_HIDDEN_CHECK_ONLY").is_some() {
                 input_hidden::run();
+            } else if std::env::var_os("NSH_IME_CHECK_ONLY").is_some() {
+                ime::run();
             } else if std::env::var_os("NSH_EMBEDDED_SCROLL_CHECK_ONLY").is_some() {
                 embedded_scroll::run();
             } else if std::env::var_os("NSH_PRESS_MOMENTUM_CHECK_ONLY").is_some() {
