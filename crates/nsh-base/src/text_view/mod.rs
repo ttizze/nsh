@@ -36,6 +36,6 @@ pub use self::{
     view::{
         CodeHighlighter, TextView, TextViewApi, TextViewCodeAction, TextViewCodeActionEvent,
         TextViewElement, TextViewEvent, TextViewLinkPressEvent, TextViewLinks, TextViewMath,
-        TextViewProps, TextViewSelectionEvent, text_view,
+        TextViewProps, TextViewSelectionEvent, TextViewTaskPressEvent, text_view,
     },
 };
